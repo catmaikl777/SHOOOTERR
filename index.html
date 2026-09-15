@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"
     />
-    <title>P2P Shooter — WebSocket Relay</title>
+    <title>P2P Shooter — WebSocket Relay + Scores</title>
     <style>
       html,
       body {
@@ -20,19 +20,16 @@
         user-select: none;
         -webkit-tap-highlight-color: transparent;
       }
-
       #game {
         width: 100vw;
         height: 100vh;
       }
-
       #ui {
         position: fixed;
         inset: 0;
         pointer-events: none;
         z-index: 5;
       }
-
       #joyL,
       #joyR {
         position: absolute;
@@ -43,15 +40,12 @@
         max-height: 230px;
         pointer-events: auto;
       }
-
       #joyL {
         left: 4vw;
       }
-
       #joyR {
         right: 4vw;
       }
-
       #status {
         position: fixed;
         top: 8px;
@@ -67,7 +61,29 @@
         background: rgba(11, 14, 19, 0.55);
         border-radius: 6px;
       }
-
+      #scores {
+        position: fixed;
+        top: 52px;
+        left: 12px;
+        color: #e6edf3;
+        font: 12px monospace;
+        z-index: 6;
+        pointer-events: none;
+        white-space: pre;
+        line-height: 1.6;
+        background: rgba(11, 14, 19, 0.55);
+        padding: 8px 12px;
+        border-radius: 6px;
+        min-width: 150px;
+      }
+      #scores .me {
+        color: #3fb950;
+        font-weight: bold;
+      }
+      #scores .dead {
+        opacity: 0.5;
+        text-decoration: line-through;
+      }
       #ac {
         position: fixed;
         top: 96px;
@@ -81,7 +97,6 @@
         opacity: 0.85;
         line-height: 1.4;
       }
-
       #voteBtn {
         position: fixed;
         top: 8px;
@@ -95,17 +110,14 @@
         z-index: 7;
         pointer-events: auto;
       }
-
       #voteBtn:active {
         background: #484f58;
       }
-
       #voteBtn.armed {
         background: #d29922;
         color: #000;
         font-weight: bold;
       }
-
       #voteInfo {
         position: fixed;
         top: 44px;
@@ -118,7 +130,6 @@
         white-space: pre;
         line-height: 1.4;
       }
-
       #menu {
         position: fixed;
         inset: 0;
@@ -134,13 +145,11 @@
         padding: 24px;
         text-align: center;
       }
-
       #menu h1 {
         margin: 0;
         font-size: 26px;
         letter-spacing: 2px;
       }
-
       #menu input {
         padding: 12px 16px;
         font-size: 18px;
@@ -152,7 +161,6 @@
         text-align: center;
         font-family: monospace;
       }
-
       #menu button {
         padding: 14px 34px;
         font-size: 18px;
@@ -163,11 +171,9 @@
         font-family: monospace;
         font-weight: bold;
       }
-
       #menu button:active {
         background: #1f6feb;
       }
-
       #pid {
         font-size: 11px;
         color: #8b949e;
@@ -175,7 +181,6 @@
         max-width: 340px;
         word-break: break-all;
       }
-
       #hint {
         font-size: 12px;
         color: #8b949e;
@@ -184,7 +189,6 @@
       }
     </style>
   </head>
-
   <body>
     <div id="game"></div>
     <div id="ui">
@@ -192,6 +196,7 @@
       <div id="joyR"></div>
     </div>
     <div id="status"></div>
+    <div id="scores"></div>
     <div id="voteInfo"></div>
     <div id="ac"></div>
     <button id="voteBtn" style="display: none">VOTE HOST</button>
@@ -213,11 +218,11 @@
 
     <script type="module">
       /* ============================================================
-       1. КОНФИГ
-       ============================================================ */
+   1. КОНФИГ
+   ============================================================ */
       const CFG = {
-        W: 2400,
-        H: 1500,
+        W: 1200,
+        H: 800,
         CELL: 40,
         PLAYER_R: 18,
         SPEED: 240,
@@ -247,7 +252,7 @@
         ACCURACY_SUSPICIOUS: 0.94,
         ACCURACY_MIN_SHOTS: 25,
         FOG_ENABLED: true,
-        FOG_RADIUS: 950,
+        FOG_RADIUS: 2000,
         STRIKE_DECAY_MS: 30000,
         STRIKE_KICK: 6,
         STRIKE_SEVERE: 2,
@@ -262,11 +267,11 @@
       const VOTE_DURATION_MS = 20000;
 
       /* 👇 URL твоего WebSocket-сервера на Render */
-      const RELAY_URL = "wss://shoooterr-1.onrender.com";
+      const RELAY_URL = "wss://shoooterr.onrender.com";
 
       /* ============================================================
-       2. DEBUG
-       ============================================================ */
+   2. DEBUG
+   ============================================================ */
       const DBG = {
         enabled: true,
         t0: performance.now(),
@@ -298,8 +303,8 @@
       };
 
       /* ============================================================
-       3. УТИЛИТЫ
-       ============================================================ */
+   3. УТИЛИТЫ
+   ============================================================ */
       function hashStr(s) {
         let h = 2166136261;
         for (let i = 0; i < s.length; i++) {
@@ -397,8 +402,8 @@
       }
 
       /* ============================================================
-       4. IDENTITY
-       ============================================================ */
+   4. IDENTITY
+   ============================================================ */
       class Identity {
         constructor() {
           this.ready = false;
@@ -529,8 +534,8 @@
       }
 
       /* ============================================================
-       5. АНТИЧИТ
-       ============================================================ */
+   5. АНТИЧИТ
+   ============================================================ */
       const AC_LOG = [];
       function acLog(msg) {
         AC_LOG.unshift(msg);
@@ -897,8 +902,8 @@
       }
 
       /* ============================================================
-       6. LAG COMP
-       ============================================================ */
+   6. LAG COMP
+   ============================================================ */
       function hostSimulateShot(
         ac,
         shooterId,
@@ -944,8 +949,8 @@
       }
 
       /* ============================================================
-       7. КАРТА
-       ============================================================ */
+   7. КАРТА
+   ============================================================ */
       const SPAWNS = [
         { x: 120, y: 120 },
         { x: CFG.W - 120, y: 120 },
@@ -981,7 +986,7 @@
           }
           return false;
         };
-        for (let i = 0; i < 110; i++) {
+        for (let i = 0; i < 60; i++) {
           const c = 2 + Math.floor(rng() * (cols - 4));
           const r = 2 + Math.floor(rng() * (rows - 4));
           const len = 1 + Math.floor(rng() * 3);
@@ -998,8 +1003,8 @@
       }
 
       /* ============================================================
-       8. BOOT SCENE
-       ============================================================ */
+   8. BOOT SCENE
+   ============================================================ */
       class BootScene extends Phaser.Scene {
         constructor() {
           super("Boot");
@@ -1033,8 +1038,8 @@
       }
 
       /* ============================================================
-       9. ИГРОВАЯ СЦЕНА
-       ============================================================ */
+   9. ИГРОВАЯ СЦЕНА
+   ============================================================ */
       class GameScene extends Phaser.Scene {
         constructor() {
           super("Game");
@@ -1077,6 +1082,7 @@
           this._lastPing = 0;
           this._lastVisibleCalc = 0;
           this._visibleCache = {};
+          this.scores = {};
 
           /* голосование */
           this.hostBlacklist = new Set();
@@ -1102,6 +1108,7 @@
             aimY: 0,
             hp: CFG.MAX_HP,
             dead: false,
+            score: 0,
           };
           this.predicted = { x: this.local.x, y: this.local.y };
 
@@ -1111,6 +1118,7 @@
 
           /* HUD */
           this.statusEl = document.getElementById("status");
+          this.scoresEl = document.getElementById("scores");
           this.voteBtn = document.getElementById("voteBtn");
           this.voteInfo = document.getElementById("voteInfo");
           this.voteBtn.style.display = "";
@@ -1178,8 +1186,8 @@
         }
 
         /* ============================================================
-         NETWORK — WebSocket Relay
-         ============================================================ */
+     NETWORK — WebSocket Relay
+     ============================================================ */
         setupNetwork() {
           DBG.log("NET", "connecting to relay...");
           DBG.log("NET", "URL:", RELAY_URL);
@@ -1199,7 +1207,6 @@
 
           this.connectToRelay();
 
-          /* Диагностика через 30 секунд */
           setTimeout(() => {
             const n = this.peers.size + (this.myPeerId ? 1 : 0);
             const ok = n > 1;
@@ -1282,7 +1289,6 @@
                 DBG.log("NET", "I AM HOST (server assigned)");
                 this.isHost = true;
                 this.hasBecomeClient = false;
-                /* Отправляем свой pubHash серверу — для persistent-бана */
                 this.sendId(
                   { pubHash: this.identity.pubHash, mode: this.identity.mode },
                   this.myPeerId,
@@ -1294,7 +1300,7 @@
                 this.isHost = false;
                 this.hasBecomeClient = true;
 
-                /* ⚡ ФИКС: добавляем всех существующих пиров (включая хоста) */
+                /* Добавляем всех существующих пиров (включая хоста) */
                 for (const peerId of msg.peers) {
                   if (peerId === this.myPeerId) continue;
                   this.peers.add(peerId);
@@ -1304,7 +1310,6 @@
                 }
 
                 if (msg.host) {
-                  /* Сразу сообщаем серверу и хосту свой pubHash для persistent-бана */
                   this.sendId(
                     {
                       pubHash: this.identity.pubHash,
@@ -1332,7 +1337,6 @@
               this.ac.ensure(msg.peerId);
 
               if (this.isHost) {
-                /* ⚡ ФИКС: добавляем нового игрока в мир хоста */
                 this.addPlayerToWorld(msg.peerId);
 
                 const p = this.ac.ensure(msg.peerId);
@@ -1415,7 +1419,6 @@
           if (v) {
             this.views[newId] = v;
             delete this.views[oldId];
-            /* Если сцена уже успела отрисовать — sprite теперь привязан к новому ключу */
             DBG.log(
               "NET",
               "view migrated:",
@@ -1482,6 +1485,7 @@
           if (!this.isHost) return;
           if (this.ac.bans.has(fromId)) return;
           if (!this.ac.validateInput(fromId, data)) return;
+          data._t = performance.now();
           this.inputs[fromId] = data;
         }
         onNetState(data) {
@@ -1591,6 +1595,7 @@
           DBG.log("PEER", "👋 onPeerLeft", id.slice(0, 12));
           delete this.inputs[id];
           delete this.worldPlayers[id];
+          delete this.scores[id];
           this.destroyView(id);
           this.ac.remove(id);
           this.votes.delete(id);
@@ -1622,6 +1627,7 @@
             dead: false,
             fireAt: 0,
             respawnAt: 0,
+            score: 0,
           };
 
           if (!this.inputs[id])
@@ -1640,7 +1646,6 @@
         becomeHost() {
           DBG.log("HOST", "becomeHost() called");
 
-          /* Запоминаем локальную позицию игрока — вдруг он уже играл как клиент */
           const myCurX = this.predicted.x;
           const myCurY = this.predicted.y;
           const meWasInitialized = Math.abs(myCurX) > 1 || Math.abs(myCurY) > 1;
@@ -1653,9 +1658,6 @@
           for (const id of ids) {
             const v = this.views[id];
             const spawn = SPAWNS[ids.indexOf(id) % SPAWNS.length];
-
-            /* Если view реально инициализирован (init=true), берём его позицию.
-             Иначе — spawn. */
             const useViewPos =
               v && v.init && (Math.abs(v.tx) > 1 || Math.abs(v.ty) > 1);
 
@@ -1670,13 +1672,13 @@
               dead: v ? v.dead : false,
               fireAt: 0,
               respawnAt: 0,
+              score: 0,
             };
 
             if (!this.inputs[id])
               this.inputs[id] = { m: [0, 0], a: [1, 0], f: 0 };
           }
 
-          /* Себя ставим в известную позицию и синхронизируем локальное состояние */
           const me = this.worldPlayers[this.myPeerId];
           if (me) {
             if (meWasInitialized) {
@@ -1688,13 +1690,11 @@
               me.y = s.y;
             }
 
-            /* Синхронизируем local/predicted, чтобы камера сразу центрировалась */
             this.local.x = me.x;
             this.local.y = me.y;
             this.predicted.x = me.x;
             this.predicted.y = me.y;
 
-            /* И view — тоже */
             const v = this.views[this.myPeerId];
             if (v) {
               v.tx = me.x;
@@ -1705,7 +1705,6 @@
             }
           }
 
-          /* Раccылаем бан-листы */
           for (const peerId of this.peers) {
             this.sendBan(
               {
@@ -1808,12 +1807,51 @@
               : "WAIT";
           const hp = Math.max(0, Math.round(this.local.hp));
           const pid = (this.identity?.pubHash || "?").slice(0, 8);
-          this.statusEl.textContent = `${role} · ${this.roomId} · игроков: ${n} · HP: ${hp} · id:${pid}`;
+          const sc = this.local.score || 0;
+          this.statusEl.textContent = `${role} · ${this.roomId} · игроков: ${n} · HP: ${hp} · очки: ${sc} · id:${pid}`;
+        }
+
+        renderScores() {
+          if (!this.scoresEl) return;
+          if (!this.scores || Object.keys(this.scores).length === 0) {
+            this.scoresEl.textContent = "";
+            return;
+          }
+
+          const rows = [];
+          for (const id in this.scores) {
+            const score = this.scores[id];
+            const v = this.views[id];
+            const isMe = id === this.myPeerId;
+            const dead = v ? v.dead : false;
+            rows.push({ id, score, isMe, dead });
+          }
+          rows.sort((a, b) => b.score - a.score);
+
+          let html = "🏆 СЧЁТ\n";
+          for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            const medal =
+              i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "  ";
+            const tag = r.isMe ? " (я)" : "";
+            const cls = r.isMe ? "me" : r.dead ? "dead" : "";
+            html += `<span class="${cls}">${medal} ${r.id.slice(0, 6)}${tag} · ${r.score}</span>\n`;
+          }
+          this.scoresEl.innerHTML = html;
         }
 
         /* =========== STATE =========== */
         applyState(data) {
           if (!data || !data.p) return;
+
+          /* Принимаем таблицу очков */
+          if (data.scores) {
+            this.scores = data.scores;
+            if (this.myPeerId && this.scores[this.myPeerId] !== undefined) {
+              this.local.score = this.scores[this.myPeerId];
+            }
+          }
+
           for (const id in data.p) {
             const [x, y, ax, ay, hp, dead] = data.p[id];
             if (id === this.myPeerId) {
@@ -1935,7 +1973,6 @@
           this.local.aimX = this.aimVec.x;
           this.local.aimY = this.aimVec.y;
 
-          /* Клиент отправляет ввод хосту */
           if (!this.isHost && time - this.lastInputSent > CFG.INPUT_MS) {
             this.lastInputSent = time;
             const hostId = this.currentHostId();
@@ -1959,6 +1996,7 @@
               a: [this.aimVec.x, this.aimVec.y],
               f: this.firing ? 1 : 0,
               d: this.local.dead ? 1 : 0,
+              _t: time,
             };
             this.simulateHost(time, dt);
           }
@@ -1968,6 +2006,7 @@
           if (time % 200 < 20) {
             this.updateStatus();
             this.updateVoteUI();
+            this.renderScores();
           }
         }
 
@@ -1988,7 +2027,13 @@
         simulateHost(time, dt) {
           for (const id in this.worldPlayers) {
             const p = this.worldPlayers[id];
-            const inp = this.inputs[id] || { m: [0, 0], a: [1, 0], f: 0 };
+            let inp = this.inputs[id] || { m: [0, 0], a: [1, 0], f: 0 };
+
+            /* Decay: если давно не слышно — стоп */
+            const lastInputAge = time - (inp._t || 0);
+            if (lastInputAge > 500 && id !== this.myPeerId) {
+              inp = { m: [0, 0], a: inp.a || [1, 0], f: 0 };
+            }
 
             if (p.dead) {
               if (time > p.respawnAt) {
@@ -2048,10 +2093,26 @@
               if (hitId) {
                 const t = this.worldPlayers[hitId];
                 t.hp -= CFG.DAMAGE;
+                let killed = false;
                 if (t.hp <= 0) {
                   t.hp = 0;
                   t.dead = true;
                   t.respawnAt = time + CFG.RESPAWN;
+                  killed = true;
+
+                  /* ⚡ УБИЙСТВО — +1 очко стрелку */
+                  const shooter = this.worldPlayers[id];
+                  if (shooter) {
+                    shooter.score = (shooter.score || 0) + 1;
+                    DBG.log(
+                      "SCORE",
+                      id.slice(0, 8),
+                      "killed",
+                      hitId.slice(0, 8),
+                      "→ score:",
+                      shooter.score,
+                    );
+                  }
                 }
                 const hd = {
                   bid: null,
@@ -2059,6 +2120,7 @@
                   by: id,
                   hp: t.hp,
                   dead: t.dead,
+                  killed,
                 };
                 this.sendHit(hd);
                 this.applyHit(hd);
@@ -2108,6 +2170,12 @@
               }
             }
 
+            /* Таблица очков — общая для всех */
+            const scores = {};
+            for (const id in this.worldPlayers) {
+              scores[id] = Math.round(this.worldPlayers[id].score || 0);
+            }
+
             for (const peerId of [this.myPeerId, ...this.peers]) {
               if (this.ac.bans.has(peerId)) continue;
               const visible = this._visibleCache[peerId];
@@ -2125,8 +2193,9 @@
                   w.dead ? 1 : 0,
                 ];
               }
-              if (peerId === this.myPeerId) this.applyState({ p: pack });
-              else this.sendState({ p: pack }, peerId);
+              const payload = { p: pack, scores };
+              if (peerId === this.myPeerId) this.applyState(payload);
+              else this.sendState(payload, peerId);
             }
           }
 
@@ -2257,8 +2326,8 @@
       }
 
       /* ============================================================
-       10. СТАРТ
-       ============================================================ */
+   10. СТАРТ
+   ============================================================ */
       (async () => {
         DBG.log("BOOT", "starting...");
         const identity = new Identity();
