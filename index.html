@@ -85,7 +85,7 @@ const CFG = {
   PLAYER_R: 18, SPEED: 240,
   BULLET_SPEED: 780, BULLET_R: 5, BULLET_LIFE: 1.4,
   FIRE_CD: 150, MAX_HP: 100, DAMAGE: 25, RESPAWN: 2500,
-  STATE_MS: 100, INPUT_MS: 66,
+  STATE_MS: 150, INPUT_MS: 66,
 }
 
 const AC_CFG = {
@@ -323,7 +323,7 @@ class AntiCheat {
         lastUpdate:performance.now(),
         inputTimes:[], lastSeq:-1, token:null, sigRequiredAt:0,
         lastFire:0, shotsFired:0, shotsHit:0,
-        aimHistory:[], lastPos:null, lastPosT:0, rtt:100,
+        aimHistory:[], lastPos:null, lastPosT:0, rtt:0,
         pubHash:null, pubJwk:null, verified:false,
         nonce:null, nonceSentAt:0,
       }
@@ -657,7 +657,6 @@ class GameScene extends Phaser.Scene {
     this._visibleCache = {}
     this.scores = {}
     this._lastLocalShot = 0
-    this._lastPingSentAt = 0
 
     /* голосование */
     this.hostBlacklist = new Set()
@@ -707,10 +706,7 @@ class GameScene extends Phaser.Scene {
     const h = this.scale.height
     const shortSide = Math.min(w, h)
 
-    /* Телефоны (короткая сторона < 600) — уменьшаем world-view,
-       чтобы игрок выглядел крупнее. Планшеты/десктоп — оставляем как было. */
     const worldView = shortSide < 600 ? 450 : 700
-
     const zoom = clamp(shortSide / worldView, 0.9, 2.5)
     this.cameras.main.setZoom(zoom)
     DBG.log('CAM', 'viewport:', w + '×' + h, 'shortSide:', shortSide, 'zoom:', zoom.toFixed(2))
@@ -1018,16 +1014,17 @@ class GameScene extends Phaser.Scene {
       this.onAntiCheatBan(data.id, data.reason || 'banned', !!data.pubHash)
     }
   }
+  /* ✅ FIX: обе стороны шлют ping и обе измеряют RTT */
   onNetPing(data, fromId){
+    const p = this.ac.ensure(fromId)
     if (data.pong){
-      if (this.isHost){
-        const p = this.ac.ensure(fromId)
-        p.rtt = performance.now() - data.t
-        p.lastUpdate = performance.now()
-      }
+      /* Пришёл ответ — считаем RTT */
+      p.rtt = performance.now() - data.t
+      p.lastUpdate = performance.now()
+      DBG.log('PING', 'pong from', fromId.slice(0,8), 'rtt:', Math.round(p.rtt))
     } else {
-      this._lastPingSentAt = performance.now()
-      this.sendPing({ t:data.t, pong:1 }, fromId)
+      /* Пришёл запрос — отвечаем pong */
+      this.sendPing({ t: data.t, pong: 1 }, fromId)
     }
   }
   async onNetIdentity(data, fromId){
@@ -1252,6 +1249,7 @@ class GameScene extends Phaser.Scene {
   }
 
   /* =========== STATUS =========== */
+  /* ✅ FIX: одна формула для обеих ролей — RTT до собеседника из ac.peers */
   updateStatus(){
     if (!this.statusEl) return
     const n = this.peers.size + (this.myPeerId ? 1 : 0)
@@ -1260,16 +1258,14 @@ class GameScene extends Phaser.Scene {
     const pid = (this.identity?.pubHash || '?').slice(0,8)
     const sc = this.local.score || 0
 
+    /* Худший RTT среди пиров — то, что чувствует самый дальний игрок.
+       У хоста это макс. по всем клиентам, у клиента — RTT до хоста. */
     let ping = 0
-    if (this.isHost){
-      let sum = 0, cnt = 0
-      for (const [, p] of this.ac.peers){
-        if (p.rtt > 0){ sum += p.rtt; cnt++ }
-      }
-      ping = cnt ? Math.round(sum / cnt) : 0
-    } else if (this._lastPingSentAt){
-      ping = Math.round(performance.now() - this._lastPingSentAt)
+    for (const [, p] of this.ac.peers){
+      const v = p.rtt || 0
+      if (v > 0 && v < 5000 && v > ping) ping = v
     }
+    ping = Math.round(ping)
 
     this.statusEl.textContent = `${role} · ${this.roomId} · игроков: ${n} · HP: ${hp} · очки: ${sc} · ping: ${ping}ms`
   }
@@ -1399,6 +1395,15 @@ class GameScene extends Phaser.Scene {
     this.local.y = this.predicted.y
     this.local.aimX = this.aimVec.x
     this.local.aimY = this.aimVec.y
+
+    /* ✅ FIX: ping-цикл у ОБОИХ — и хост, и клиент шлют ping всем пирам.
+       Раньше это было только в simulateHost → у клиента ping не измерялся. */
+    if (time - this._lastPing > 2000){
+      this._lastPing = time
+      for (const peerId of this.peers){
+        this.sendPing({ t: performance.now(), pong: 0 }, peerId)
+      }
+    }
 
     /* Клиент отправляет ввод хосту */
     if (!this.isHost && time - this.lastInputSent > CFG.INPUT_MS){
@@ -1565,7 +1570,7 @@ class GameScene extends Phaser.Scene {
           const w = this.worldPlayers[id]
           if (!w) continue
           pack[id] = [
-            Math.round(w.x), Math.round(w.y),               // было *10
+            Math.round(w.x), Math.round(w.y),
             Math.round(w.aimX*100)/100, Math.round(w.aimY*100)/100,
             Math.round(w.hp), w.dead ? 1 : 0,
           ]
@@ -1575,13 +1580,7 @@ class GameScene extends Phaser.Scene {
         else this.sendState(payload, peerId)
       }
     }
-
-    if (time - this._lastPing > 2000){
-      this._lastPing = time
-      for (const peerId of this.peers){
-        this.sendPing({ t: performance.now(), pong:0 }, peerId)
-      }
-    }
+    /* ⚠️ ping-цикл убран отсюда → перенесён в update() */
   }
 
   hostSpawnBullet(ownerId, x, y, ax, ay){
@@ -1622,7 +1621,6 @@ class GameScene extends Phaser.Scene {
     for (const id in this.views){
       const v = this.views[id]
 
-      /* Свой игрок — мгновенно */
       if (id === this.myPeerId){
         v.tx = this.local.x; v.ty = this.local.y
         v.ta = Math.atan2(this.local.aimY, this.local.aimX)
@@ -1631,7 +1629,6 @@ class GameScene extends Phaser.Scene {
         if (!v.init){ v.init = true; v.sprite.x = v.tx; v.sprite.y = v.ty }
         else { v.sprite.x = v.tx; v.sprite.y = v.ty }
       } else if (v.buffer && v.buffer.length >= 2){
-        /* Чужие — интерполяция с задержкой 100мс */
         const renderTime = performance.now() - 100
         let a = v.buffer[0], b = v.buffer[v.buffer.length-1]
         for (let i = 0; i < v.buffer.length - 1; i++){
@@ -1648,7 +1645,6 @@ class GameScene extends Phaser.Scene {
         v.dead = b.dead
         v.init = true
       } else {
-        /* Fallback */
         if (!v.init){ v.init = true; v.sprite.x = v.tx; v.sprite.y = v.ty }
         else {
           v.sprite.x += (v.tx - v.sprite.x) * k
