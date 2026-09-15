@@ -2067,19 +2067,19 @@
               const len = Math.hypot(p.aimX, p.aimY) || 1;
               const ax = p.aimX / len,
                 ay = p.aimY / len;
-              const sx = p.x + ax * (CFG.PLAYER_R + 6);
-              const sy = p.y + ay * (CFG.PLAYER_R + 6);
-              if (
-                !this.ac.validateBulletOrigin(
-                  sx,
-                  sy,
-                  this.wallRects,
-                  CFG.BULLET_R,
-                )
-              ) {
-                this.ac.strike(id, "bullet in wall", 1);
-                continue;
-              }
+              // const sx = p.x + ax * (CFG.PLAYER_R + 6);
+              // const sy = p.y + ay * (CFG.PLAYER_R + 6);
+              // if (
+              //   !this.ac.validateBulletOrigin(
+              //     sx,
+              //     sy,
+              //     this.wallRects,
+              //     CFG.BULLET_R,
+              //   )
+              // ) {
+              //   this.ac.strike(id, "bullet in wall", 1);
+              //   continue;
+              // }
               p.fireAt = time;
               const hitId = hostSimulateShot(
                 this.ac,
