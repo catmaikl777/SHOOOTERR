@@ -1,2367 +1,1734 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"
-    />
-    <title>P2P Shooter — WebSocket Relay + Scores</title>
-    <style>
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        height: 100%;
-        background: #0b0e13;
-        overflow: hidden;
-        touch-action: none;
-        -webkit-user-select: none;
-        user-select: none;
-        -webkit-tap-highlight-color: transparent;
-      }
-      #game {
-        width: 100vw;
-        height: 100vh;
-      }
-      #ui {
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        z-index: 5;
-      }
-      #joyL,
-      #joyR {
-        position: absolute;
-        bottom: 5vh;
-        width: 38vw;
-        height: 38vw;
-        max-width: 230px;
-        max-height: 230px;
-        pointer-events: auto;
-      }
-      #joyL {
-        left: 4vw;
-      }
-      #joyR {
-        right: 4vw;
-      }
-      #status {
-        position: fixed;
-        top: 8px;
-        left: 50%;
-        transform: translateX(-50%);
-        color: #8b949e;
-        font: 12px monospace;
-        z-index: 6;
-        text-align: center;
-        pointer-events: none;
-        white-space: pre;
-        padding: 4px 10px;
-        background: rgba(11, 14, 19, 0.55);
-        border-radius: 6px;
-      }
-      #scores {
-        position: fixed;
-        top: 52px;
-        left: 12px;
-        color: #e6edf3;
-        font: 12px monospace;
-        z-index: 6;
-        pointer-events: none;
-        white-space: pre;
-        line-height: 1.6;
-        background: rgba(11, 14, 19, 0.55);
-        padding: 8px 12px;
-        border-radius: 6px;
-        min-width: 150px;
-      }
-      #scores .me {
-        color: #3fb950;
-        font-weight: bold;
-      }
-      #scores .dead {
-        opacity: 0.5;
-        text-decoration: line-through;
-      }
-      #ac {
-        position: fixed;
-        top: 96px;
-        right: 8px;
-        color: #f85149;
-        font: 10px monospace;
-        z-index: 6;
-        text-align: right;
-        pointer-events: none;
-        white-space: pre;
-        opacity: 0.85;
-        line-height: 1.4;
-      }
-      #voteBtn {
-        position: fixed;
-        top: 8px;
-        right: 8px;
-        padding: 8px 12px;
-        font: 12px monospace;
-        background: #30363d;
-        color: #e6edf3;
-        border: 0;
-        border-radius: 6px;
-        z-index: 7;
-        pointer-events: auto;
-      }
-      #voteBtn:active {
-        background: #484f58;
-      }
-      #voteBtn.armed {
-        background: #d29922;
-        color: #000;
-        font-weight: bold;
-      }
-      #voteInfo {
-        position: fixed;
-        top: 44px;
-        right: 8px;
-        color: #d29922;
-        font: 11px monospace;
-        z-index: 7;
-        text-align: right;
-        pointer-events: none;
-        white-space: pre;
-        line-height: 1.4;
-      }
-      #menu {
-        position: fixed;
-        inset: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        background: #0b0e13;
-        color: #e6edf3;
-        font-family: monospace;
-        gap: 16px;
-        z-index: 20;
-        padding: 24px;
-        text-align: center;
-      }
-      #menu h1 {
-        margin: 0;
-        font-size: 26px;
-        letter-spacing: 2px;
-      }
-      #menu input {
-        padding: 12px 16px;
-        font-size: 18px;
-        border-radius: 8px;
-        border: 1px solid #30363d;
-        background: #161b22;
-        color: #e6edf3;
-        width: 220px;
-        text-align: center;
-        font-family: monospace;
-      }
-      #menu button {
-        padding: 14px 34px;
-        font-size: 18px;
-        border-radius: 8px;
-        border: 0;
-        background: #2f81f7;
-        color: #fff;
-        font-family: monospace;
-        font-weight: bold;
-      }
-      #menu button:active {
-        background: #1f6feb;
-      }
-      #pid {
-        font-size: 11px;
-        color: #8b949e;
-        line-height: 1.7;
-        max-width: 340px;
-        word-break: break-all;
-      }
-      #hint {
-        font-size: 12px;
-        color: #8b949e;
-        line-height: 1.7;
-        max-width: 320px;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="game"></div>
-    <div id="ui">
-      <div id="joyL"></div>
-      <div id="joyR"></div>
-    </div>
-    <div id="status"></div>
-    <div id="scores"></div>
-    <div id="voteInfo"></div>
-    <div id="ac"></div>
-    <button id="voteBtn" style="display: none">VOTE HOST</button>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>P2P Shooter — Adaptive Camera</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#0b0e13;overflow:hidden;
+            touch-action:none;-webkit-user-select:none;user-select:none;
+            -webkit-tap-highlight-color:transparent;}
+  #game{width:100vw;height:100vh;}
+  #ui{position:fixed;inset:0;pointer-events:none;z-index:5;}
+  #joyL,#joyR{position:absolute;bottom:5vh;width:32vmin;height:32vmin;
+              max-width:280px;max-height:280px;min-width:120px;min-height:120px;
+              pointer-events:auto;}
+  #joyL{left:4vw;} #joyR{right:4vw;}
+  #status{position:fixed;top:8px;left:50%;transform:translateX(-50%);
+          color:#8b949e;font:clamp(11px,1.8vmin,16px) monospace;z-index:6;
+          text-align:center;pointer-events:none;white-space:pre;padding:4px 10px;
+          background:rgba(11,14,19,.55);border-radius:6px;}
+  #scores{position:fixed;top:52px;left:12px;color:#e6edf3;
+          font:clamp(11px,1.8vmin,16px) monospace;
+          z-index:6;pointer-events:none;white-space:pre;line-height:1.6;
+          background:rgba(11,14,19,.55);padding:8px 12px;border-radius:6px;
+          min-width:140px;}
+  #scores .me{color:#3fb950;font-weight:bold;}
+  #scores .dead{opacity:.5;text-decoration:line-through;}
+  #ac{position:fixed;top:96px;right:8px;color:#f85149;
+      font:clamp(9px,1.5vmin,13px) monospace;
+      z-index:6;text-align:right;pointer-events:none;white-space:pre;opacity:.85;line-height:1.4;}
+  #voteBtn{position:fixed;top:8px;right:8px;
+           padding:clamp(8px,1.5vmin,14px) clamp(12px,2.2vmin,22px);
+           font:clamp(11px,1.8vmin,15px) monospace;
+           background:#30363d;color:#e6edf3;border:0;border-radius:6px;
+           z-index:7;pointer-events:auto;}
+  #voteBtn:active{background:#484f58;}
+  #voteBtn.armed{background:#d29922;color:#000;font-weight:bold;}
+  #voteInfo{position:fixed;top:44px;right:8px;color:#d29922;
+            font:clamp(10px,1.6vmin,14px) monospace;
+            z-index:7;text-align:right;pointer-events:none;white-space:pre;line-height:1.4;}
+  #menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+        justify-content:center;background:#0b0e13;color:#e6edf3;
+        font-family:monospace;gap:16px;z-index:20;padding:24px;text-align:center;}
+  #menu h1{margin:0;font-size:clamp(22px,4vmin,32px);letter-spacing:2px;}
+  #menu input{padding:12px 16px;font-size:clamp(14px,2.2vmin,18px);border-radius:8px;
+              border:1px solid #30363d;background:#161b22;color:#e6edf3;
+              width:220px;text-align:center;font-family:monospace;}
+  #menu button{padding:14px 34px;font-size:clamp(14px,2.2vmin,18px);border-radius:8px;border:0;
+               background:#2f81f7;color:#fff;font-family:monospace;font-weight:bold;}
+  #menu button:active{background:#1f6feb;}
+  #pid{font-size:clamp(10px,1.6vmin,13px);color:#8b949e;line-height:1.7;max-width:340px;word-break:break-all;}
+  #hint{font-size:clamp(11px,1.8vmin,14px);color:#8b949e;line-height:1.7;max-width:320px;}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="ui"><div id="joyL"></div><div id="joyR"></div></div>
+<div id="status"></div>
+<div id="scores"></div>
+<div id="voteInfo"></div>
+<div id="ac"></div>
+<button id="voteBtn" style="display:none">VOTE HOST</button>
 
-    <div id="menu">
-      <h1>P2P SHOOTER</h1>
-      <input id="roomInput" placeholder="код комнаты" value="arena1" />
-      <button id="playBtn">ИГРАТЬ</button>
-      <div id="hint">
-        Левый стик — движение<br />
-        Правый стик — прицел и огонь<br />
-        Первый зашедший — хост. VOTE HOST — смена хоста
-      </div>
-      <div id="pid">…generating identity…</div>
-    </div>
+<div id="menu">
+  <h1>P2P SHOOTER</h1>
+  <input id="roomInput" placeholder="код комнаты" value="arena1" />
+  <button id="playBtn">ИГРАТЬ</button>
+  <div id="hint">
+    Левый стик — движение<br>
+    Правый стик — прицел и огонь<br>
+    Первый зашедший — хост. VOTE HOST — смена хоста
+  </div>
+  <div id="pid">…generating identity…</div>
+</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.1/dist/nipplejs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.1/dist/nipplejs.min.js"></script>
 
-    <script type="module">
-      /* ============================================================
+<script type="module">
+/* ============================================================
    1. КОНФИГ
    ============================================================ */
-      const CFG = {
-        W: 1200,
-        H: 800,
-        CELL: 40,
-        PLAYER_R: 18,
-        SPEED: 240,
-        BULLET_SPEED: 780,
-        BULLET_R: 5,
-        BULLET_LIFE: 1.4,
-        FIRE_CD: 150,
-        MAX_HP: 100,
-        DAMAGE: 25,
-        RESPAWN: 2500,
-        STATE_MS: 50,
-        INPUT_MS: 33,
-      };
+const CFG = {
+  W: 1800, H: 1200, CELL: 40,
+  PLAYER_R: 18, SPEED: 240,
+  BULLET_SPEED: 780, BULLET_R: 5, BULLET_LIFE: 1.4,
+  FIRE_CD: 150, MAX_HP: 100, DAMAGE: 25, RESPAWN: 2500,
+  STATE_MS: 50, INPUT_MS: 33,
+}
 
-      const AC_CFG = {
-        MAX_INPUT_HZ: 45,
-        MAX_PACKET_BYTES: 512,
-        MAX_SEQ_GAP: 300,
-        PEER_TIMEOUT_MS: 20000,
-        SPEED_TOLERANCE: 1.35,
-        TELEPORT_HARD: 150,
-        FIRE_TOLERANCE: 0.85,
-        AIM_MIN_MAG: 0.05,
-        AIM_SNAP_DEG: 100,
-        AIM_SNAP_WINDOW_MS: 40,
-        AIM_HISTORY_MS: 2500,
-        ACCURACY_SUSPICIOUS: 0.94,
-        ACCURACY_MIN_SHOTS: 25,
-        FOG_ENABLED: true,
-        FOG_RADIUS: 2000,
-        STRIKE_DECAY_MS: 30000,
-        STRIKE_KICK: 6,
-        STRIKE_SEVERE: 2,
-        SUSPICION_KICK: 25,
-        SUSPICION_DECAY: 0.35,
-        HISTORY_MS: 1000,
-        MAX_REWIND_MS: 300,
-        SIG_GRACE_MS: 3000,
-      };
+const AC_CFG = {
+  MAX_INPUT_HZ: 45, MAX_PACKET_BYTES: 512, MAX_SEQ_GAP: 300, PEER_TIMEOUT_MS: 20000,
+  SPEED_TOLERANCE: 1.35, TELEPORT_HARD: 150,
+  FIRE_TOLERANCE: 0.85, AIM_MIN_MAG: 0.05,
+  AIM_SNAP_DEG: 100, AIM_SNAP_WINDOW_MS: 40, AIM_HISTORY_MS: 2500,
+  ACCURACY_SUSPICIOUS: 0.94, ACCURACY_MIN_SHOTS: 25,
+  FOG_ENABLED: true, FOG_RADIUS: 2000,
+  STRIKE_DECAY_MS: 30000, STRIKE_KICK: 6, STRIKE_SEVERE: 2,
+  SUSPICION_KICK: 25, SUSPICION_DECAY: 0.35,
+  HISTORY_MS: 1000, MAX_REWIND_MS: 300,
+  SIG_GRACE_MS: 3000,
+}
 
-      const APP_ID = "p2p-shooter-identity-v1";
-      const VOTE_DURATION_MS = 20000;
+const APP_ID = 'p2p-shooter-identity-v1'
+const VOTE_DURATION_MS = 20000
 
-      const RELAY_URL = "wss://shoooterr.relaxdev.ru";
+/* 👇 URL твоего WebSocket-сервера */
+const RELAY_URL = 'wss://shoooterr.onrender.com'
 
-      /* ============================================================
+/* ============================================================
    2. DEBUG
    ============================================================ */
-      const DBG = {
-        enabled: true,
-        t0: performance.now(),
-        log(tag, ...args) {
-          if (!this.enabled) return;
-          const dt = ((performance.now() - this.t0) / 1000).toFixed(2);
-          console.log(
-            `%c[T:${tag} +${dt}s]`,
-            "color:#3fb950;font-weight:bold",
-            ...args,
-          );
-        },
-        warn(tag, ...args) {
-          if (!this.enabled) return;
-          const dt = ((performance.now() - this.t0) / 1000).toFixed(2);
-          console.warn(`[T:${tag} +${dt}s]`, ...args);
-        },
-        err(tag, ...args) {
-          if (!this.enabled) return;
-          const dt = ((performance.now() - this.t0) / 1000).toFixed(2);
-          console.error(`[T:${tag} +${dt}s]`, ...args);
-        },
-        banner(text, color = "#2f81f7") {
-          console.log(
-            `%c ${text} `,
-            `background:${color};color:#fff;padding:4px 8px;font-weight:bold;border-radius:3px`,
-          );
-        },
-      };
+const DBG = {
+  enabled: true,
+  t0: performance.now(),
+  log(tag, ...args){
+    if (!this.enabled) return
+    const dt = ((performance.now() - this.t0) / 1000).toFixed(2)
+    console.log(`%c[T:${tag} +${dt}s]`, 'color:#3fb950;font-weight:bold', ...args)
+  },
+  warn(tag, ...args){
+    if (!this.enabled) return
+    const dt = ((performance.now() - this.t0) / 1000).toFixed(2)
+    console.warn(`[T:${tag} +${dt}s]`, ...args)
+  },
+  err(tag, ...args){
+    if (!this.enabled) return
+    const dt = ((performance.now() - this.t0) / 1000).toFixed(2)
+    console.error(`[T:${tag} +${dt}s]`, ...args)
+  },
+  banner(text, color = '#2f81f7'){
+    console.log(`%c ${text} `, `background:${color};color:#fff;padding:4px 8px;font-weight:bold;border-radius:3px`)
+  },
+}
 
-      /* ============================================================
+/* ============================================================
    3. УТИЛИТЫ
    ============================================================ */
-      function hashStr(s) {
-        let h = 2166136261;
-        for (let i = 0; i < s.length; i++) {
-          h ^= s.charCodeAt(i);
-          h = Math.imul(h, 16777619);
-        }
-        return h >>> 0;
-      }
-      function mulberry32(a) {
-        return function () {
-          a |= 0;
-          a = (a + 0x6d2b79f5) | 0;
-          let t = Math.imul(a ^ (a >>> 15), 1 | a);
-          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-        };
-      }
-      function colorFromId(id) {
-        const h = hashStr(id || "x") % 360;
-        return Phaser.Display.Color.HSVToRGB(h / 360, 0.7, 1).color;
-      }
-      function clamp(v, a, b) {
-        return v < a ? a : v > b ? b : v;
-      }
-      function fnv1a(str) {
-        let h = 2166136261 >>> 0;
-        for (let i = 0; i < str.length; i++) {
-          h ^= str.charCodeAt(i);
-          h = Math.imul(h, 16777619);
-        }
-        return (h >>> 0).toString(36);
-      }
-      function randomToken(len = 24) {
-        const b = new Uint8Array(len);
-        crypto.getRandomValues(b);
-        return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-      }
-      function safePeerId(s) {
-        return String(s)
-          .replace(/[^A-Za-z0-9_-]/g, "_")
-          .slice(0, 60);
-      }
+function hashStr(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function colorFromId(id){const h=hashStr(id||'x')%360;return Phaser.Display.Color.HSVToRGB(h/360,0.7,1).color}
+function clamp(v,a,b){return v<a?a:v>b?b:v}
+function fnv1a(str){let h=2166136261>>>0;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)}return(h>>>0).toString(36)}
+function randomToken(len=24){const b=new Uint8Array(len);crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,'0')).join('')}
+function safePeerId(s){ return String(s).replace(/[^A-Za-z0-9_-]/g,'_').slice(0,60) }
 
-      function resolveCircleRect(px, py, r, rect) {
-        const cx = clamp(px, rect.x, rect.x + rect.w),
-          cy = clamp(py, rect.y, rect.y + rect.h);
-        const dx = px - cx,
-          dy = py - cy;
-        const d2 = dx * dx + dy * dy;
-        if (d2 >= r * r) return null;
-        if (d2 < 0.0001) {
-          const left = px - rect.x,
-            right = rect.x + rect.w - px,
-            top = py - rect.y,
-            bottom = rect.y + rect.h - py;
-          const m = Math.min(left, right, top, bottom);
-          if (m === left) return { x: rect.x - r, y: py };
-          if (m === right) return { x: rect.x + rect.w + r, y: py };
-          if (m === top) return { x: px, y: rect.y - r };
-          return { x: px, y: rect.y + rect.h + r };
-        }
-        const d = Math.sqrt(d2);
-        const k = (r - d) / d;
-        return { x: px + dx * k, y: py + dy * k };
-      }
+function resolveCircleRect(px,py,r,rect){
+  const cx=clamp(px,rect.x,rect.x+rect.w), cy=clamp(py,rect.y,rect.y+rect.h)
+  const dx=px-cx, dy=py-cy
+  const d2=dx*dx+dy*dy
+  if(d2>=r*r) return null
+  if(d2<0.0001){
+    const left=px-rect.x,right=rect.x+rect.w-px,top=py-rect.y,bottom=rect.y+rect.h-py
+    const m=Math.min(left,right,top,bottom)
+    if(m===left)  return {x:rect.x-r, y:py}
+    if(m===right) return {x:rect.x+rect.w+r, y:py}
+    if(m===top)   return {x:px, y:rect.y-r}
+    return {x:px, y:rect.y+rect.h+r}
+  }
+  const d=Math.sqrt(d2); const k=(r-d)/d
+  return {x:px+dx*k, y:py+dy*k}
+}
 
-      function segIntersectsRect(x1, y1, x2, y2, r) {
-        const dx = x2 - x1,
-          dy = y2 - y1;
-        let t0 = 0,
-          t1 = 1;
-        const p = [-dx, dx, -dy, dy];
-        const q = [x1 - r.x, r.x + r.w - x1, y1 - r.y, r.y + r.h - y1];
-        for (let i = 0; i < 4; i++) {
-          if (p[i] === 0) {
-            if (q[i] < 0) return false;
-            continue;
-          }
-          const t = q[i] / p[i];
-          if (p[i] < 0) {
-            if (t > t1) return false;
-            if (t > t0) t0 = t;
-          } else {
-            if (t < t0) return false;
-            if (t < t1) t1 = t;
-          }
-        }
-        return true;
-      }
-      function lineOfSight(x1, y1, x2, y2, walls) {
-        for (const w of walls) {
-          if (segIntersectsRect(x1, y1, x2, y2, w)) return false;
-        }
-        return true;
-      }
+function segIntersectsRect(x1,y1,x2,y2,r){
+  const dx=x2-x1, dy=y2-y1
+  let t0=0,t1=1
+  const p=[-dx,dx,-dy,dy]
+  const q=[x1-r.x, r.x+r.w-x1, y1-r.y, r.y+r.h-y1]
+  for(let i=0;i<4;i++){
+    if(p[i]===0){ if(q[i]<0) return false; continue }
+    const t=q[i]/p[i]
+    if(p[i]<0){ if(t>t1) return false; if(t>t0) t0=t }
+    else      { if(t<t0) return false; if(t<t1) t1=t }
+  }
+  return true
+}
+function lineOfSight(x1,y1,x2,y2,walls){
+  for(const w of walls){ if(segIntersectsRect(x1,y1,x2,y2,w)) return false }
+  return true
+}
 
-      /* ============================================================
+/* ============================================================
    4. IDENTITY
    ============================================================ */
-      class Identity {
-        constructor() {
-          this.ready = false;
-          this.mode = "none";
-          this.pubHash = null;
-          this.keyPair = null;
-          this.pubJwk = null;
-        }
+class Identity {
+  constructor(){
+    this.ready=false
+    this.mode='none'
+    this.pubHash=null
+    this.keyPair=null
+    this.pubJwk=null
+  }
 
-        async init() {
-          if (!(window.isSecureContext && window.crypto && crypto.subtle)) {
-            let stored = localStorage.getItem("p2p_fallback_id");
-            if (!stored) {
-              stored = randomToken(12);
-              localStorage.setItem("p2p_fallback_id", stored);
-            }
-            this.pubHash = "fb_" + stored;
-            this.mode = "fallback";
-            this.ready = true;
-            DBG.log("ID", "fallback mode", this.pubHash);
-            return;
-          }
-
-          const storeKey = "p2p_ecdsa_key";
-          let stored = null;
-          try {
-            stored = JSON.parse(localStorage.getItem(storeKey));
-          } catch {}
-
-          try {
-            if (stored && stored.priv && stored.pub) {
-              this.keyPair = {
-                privateKey: await crypto.subtle.importKey(
-                  "jwk",
-                  stored.priv,
-                  { name: "ECDSA", namedCurve: "P-256" },
-                  true,
-                  ["sign"],
-                ),
-                publicKey: await crypto.subtle.importKey(
-                  "jwk",
-                  stored.pub,
-                  { name: "ECDSA", namedCurve: "P-256" },
-                  true,
-                  ["verify"],
-                ),
-              };
-              this.pubJwk = stored.pub;
-            } else {
-              this.keyPair = await crypto.subtle.generateKey(
-                { name: "ECDSA", namedCurve: "P-256" },
-                true,
-                ["sign", "verify"],
-              );
-              this.pubJwk = await crypto.subtle.exportKey(
-                "jwk",
-                this.keyPair.publicKey,
-              );
-              const privJwk = await crypto.subtle.exportKey(
-                "jwk",
-                this.keyPair.privateKey,
-              );
-              localStorage.setItem(
-                storeKey,
-                JSON.stringify({ priv: privJwk, pub: this.pubJwk }),
-              );
-            }
-            const hex = await this._sha256hex(JSON.stringify(this.pubJwk));
-            this.pubHash = hex.slice(0, 16);
-            this.mode = "crypto";
-            this.ready = true;
-            DBG.log("ID", "crypto mode ready", this.pubHash);
-          } catch (e) {
-            DBG.warn("ID", "crypto failed, fallback", e);
-            let stored2 =
-              localStorage.getItem("p2p_fallback_id") || randomToken(12);
-            localStorage.setItem("p2p_fallback_id", stored2);
-            this.pubHash = "fb_" + stored2;
-            this.mode = "fallback";
-            this.ready = true;
-          }
-        }
-
-        async _sha256hex(str) {
-          const buf = new TextEncoder().encode(str);
-          const h = await crypto.subtle.digest("SHA-256", buf);
-          return Array.from(new Uint8Array(h), (b) =>
-            b.toString(16).padStart(2, "0"),
-          ).join("");
-        }
-
-        async sign(str) {
-          if (this.mode !== "crypto") return "no-crypto";
-          if (!crypto?.subtle) return "no-crypto";
-          const buf = new TextEncoder().encode(str);
-          const sig = await crypto.subtle.sign(
-            { name: "ECDSA", hash: "SHA-256" },
-            this.keyPair.privateKey,
-            buf,
-          );
-          return btoa(String.fromCharCode(...new Uint8Array(sig)));
-        }
-
-        async verify(pubJwk, str, sigB64) {
-          if (this.mode !== "crypto") return false;
-          if (!crypto?.subtle) return false;
-          if (!pubJwk || !sigB64) return false;
-          try {
-            const pub = await crypto.subtle.importKey(
-              "jwk",
-              pubJwk,
-              { name: "ECDSA", namedCurve: "P-256" },
-              true,
-              ["verify"],
-            );
-            const buf = new TextEncoder().encode(str);
-            const sig = Uint8Array.from(atob(sigB64), (c) => c.charCodeAt(0));
-            return await crypto.subtle.verify(
-              { name: "ECDSA", hash: "SHA-256" },
-              pub,
-              sig,
-              buf,
-            );
-          } catch {
-            return false;
-          }
-        }
+  async init(){
+    if (!(window.isSecureContext && window.crypto && crypto.subtle)) {
+      let stored = localStorage.getItem('p2p_fallback_id')
+      if (!stored) {
+        stored = randomToken(12)
+        localStorage.setItem('p2p_fallback_id', stored)
       }
+      this.pubHash = 'fb_' + stored
+      this.mode = 'fallback'
+      this.ready = true
+      DBG.log('ID', 'fallback mode', this.pubHash)
+      return
+    }
 
-      /* ============================================================
+    const storeKey = 'p2p_ecdsa_key'
+    let stored = null
+    try { stored = JSON.parse(localStorage.getItem(storeKey)) } catch {}
+
+    try {
+      if (stored && stored.priv && stored.pub) {
+        this.keyPair = {
+          privateKey: await crypto.subtle.importKey(
+            'jwk', stored.priv,
+            {name:'ECDSA', namedCurve:'P-256'}, true, ['sign']),
+          publicKey: await crypto.subtle.importKey(
+            'jwk', stored.pub,
+            {name:'ECDSA', namedCurve:'P-256'}, true, ['verify']),
+        }
+        this.pubJwk = stored.pub
+      } else {
+        this.keyPair = await crypto.subtle.generateKey(
+          {name:'ECDSA', namedCurve:'P-256'}, true, ['sign','verify'])
+        this.pubJwk = await crypto.subtle.exportKey('jwk', this.keyPair.publicKey)
+        const privJwk = await crypto.subtle.exportKey('jwk', this.keyPair.privateKey)
+        localStorage.setItem(storeKey, JSON.stringify({priv: privJwk, pub: this.pubJwk}))
+      }
+      const hex = await this._sha256hex(JSON.stringify(this.pubJwk))
+      this.pubHash = hex.slice(0,16)
+      this.mode = 'crypto'
+      this.ready = true
+      DBG.log('ID', 'crypto mode ready', this.pubHash)
+    } catch (e) {
+      DBG.warn('ID', 'crypto failed, fallback', e)
+      let stored2 = localStorage.getItem('p2p_fallback_id') || randomToken(12)
+      localStorage.setItem('p2p_fallback_id', stored2)
+      this.pubHash = 'fb_' + stored2
+      this.mode = 'fallback'
+      this.ready = true
+    }
+  }
+
+  async _sha256hex(str){
+    const buf = new TextEncoder().encode(str)
+    const h = await crypto.subtle.digest('SHA-256', buf)
+    return Array.from(new Uint8Array(h), b => b.toString(16).padStart(2,'0')).join('')
+  }
+
+  async sign(str){
+    if (this.mode !== 'crypto') return 'no-crypto'
+    if (!crypto?.subtle) return 'no-crypto'
+    const buf = new TextEncoder().encode(str)
+    const sig = await crypto.subtle.sign(
+      {name:'ECDSA', hash:'SHA-256'}, this.keyPair.privateKey, buf)
+    return btoa(String.fromCharCode(...new Uint8Array(sig)))
+  }
+
+  async verify(pubJwk, str, sigB64){
+    if (this.mode !== 'crypto') return false
+    if (!crypto?.subtle) return false
+    if (!pubJwk || !sigB64) return false
+    try {
+      const pub = await crypto.subtle.importKey(
+        'jwk', pubJwk,
+        {name:'ECDSA', namedCurve:'P-256'}, true, ['verify'])
+      const buf = new TextEncoder().encode(str)
+      const sig = Uint8Array.from(atob(sigB64), c => c.charCodeAt(0))
+      return await crypto.subtle.verify(
+        {name:'ECDSA', hash:'SHA-256'}, pub, sig, buf)
+    } catch { return false }
+  }
+}
+
+/* ============================================================
    5. АНТИЧИТ
    ============================================================ */
-      const AC_LOG = [];
-      function acLog(msg) {
-        AC_LOG.unshift(msg);
-        if (AC_LOG.length > 6) AC_LOG.pop();
-        const el = document.getElementById("ac");
-        if (el) el.textContent = AC_LOG.join("\n");
-        console.log("[AC]", msg);
+const AC_LOG = []
+function acLog(msg){
+  AC_LOG.unshift(msg)
+  if (AC_LOG.length > 6) AC_LOG.pop()
+  const el = document.getElementById('ac')
+  if (el) el.textContent = AC_LOG.join('\n')
+  console.log('[AC]', msg)
+}
+
+class AntiCheat {
+  constructor(scene){
+    this.scene = scene
+    this.peers = new Map()
+    this.bans = new Set()
+    this.persistentBans = new Set()
+    this.myToken = null
+    this.seq = 0
+    this.histories = new Map()
+    this.identity = null
+    this.loadPersistentBans()
+  }
+
+  loadPersistentBans(){
+    try {
+      const raw = localStorage.getItem('p2p_bans_' + APP_ID)
+      if (raw) {
+        const arr = JSON.parse(raw)
+        if (Array.isArray(arr)) for (const h of arr) this.persistentBans.add(h)
       }
+    } catch {}
+  }
+  savePersistentBans(){
+    try {
+      localStorage.setItem('p2p_bans_' + APP_ID, JSON.stringify([...this.persistentBans]))
+    } catch {}
+  }
+  isPersistentlyBanned(pubHash){ return !!(pubHash && this.persistentBans.has(pubHash)) }
+  addPersistentBan(pubHash){ if (!pubHash) return; this.persistentBans.add(pubHash); this.savePersistentBans() }
 
-      class AntiCheat {
-        constructor(scene) {
-          this.scene = scene;
-          this.peers = new Map();
-          this.bans = new Set();
-          this.persistentBans = new Set();
-          this.myToken = null;
-          this.seq = 0;
-          this.histories = new Map();
-          this.identity = null;
-          this.loadPersistentBans();
-        }
-
-        loadPersistentBans() {
-          try {
-            const raw = localStorage.getItem("p2p_bans_" + APP_ID);
-            if (raw) {
-              const arr = JSON.parse(raw);
-              if (Array.isArray(arr))
-                for (const h of arr) this.persistentBans.add(h);
-            }
-          } catch {}
-        }
-        savePersistentBans() {
-          try {
-            localStorage.setItem(
-              "p2p_bans_" + APP_ID,
-              JSON.stringify([...this.persistentBans]),
-            );
-          } catch {}
-        }
-        isPersistentlyBanned(pubHash) {
-          return !!(pubHash && this.persistentBans.has(pubHash));
-        }
-        addPersistentBan(pubHash) {
-          if (!pubHash) return;
-          this.persistentBans.add(pubHash);
-          this.savePersistentBans();
-        }
-
-        ensure(id) {
-          let p = this.peers.get(id);
-          if (!p) {
-            p = {
-              strikes: 0,
-              lastStrike: 0,
-              suspicion: 0,
-              lastUpdate: performance.now(),
-              inputTimes: [],
-              lastSeq: -1,
-              token: null,
-              sigRequiredAt: 0,
-              lastFire: 0,
-              shotsFired: 0,
-              shotsHit: 0,
-              aimHistory: [],
-              lastPos: null,
-              lastPosT: 0,
-              rtt: 100,
-              pubHash: null,
-              pubJwk: null,
-              verified: false,
-              nonce: null,
-              nonceSentAt: 0,
-            };
-            this.peers.set(id, p);
-          }
-          return p;
-        }
-        remove(id) {
-          this.peers.delete(id);
-          this.histories.delete(id);
-        }
-
-        strike(id, reason, w = 1) {
-          const p = this.ensure(id);
-          p.strikes += w;
-          p.lastStrike = performance.now();
-          acLog(
-            `⚡ ${id.slice(0, 6)} ${reason} (${p.strikes}/${AC_CFG.STRIKE_KICK})`,
-          );
-          if (p.strikes >= AC_CFG.STRIKE_KICK) {
-            this.ban(id, reason);
-            return false;
-          }
-          return true;
-        }
-        ban(id, reason, persistent = false) {
-          if (this.bans.has(id)) return;
-          this.bans.add(id);
-          const p = this.peers.get(id);
-          if (persistent && p && p.pubHash) {
-            this.addPersistentBan(p.pubHash);
-            acLog(`⛔ PERMABAN ${p.pubHash.slice(0, 6)}: ${reason}`);
-          } else {
-            acLog(`⛔ BAN ${id.slice(0, 6)}: ${reason}`);
-          }
-          this.scene.onAntiCheatBan?.(id, reason, persistent);
-        }
-        decay(id, dtSec) {
-          const p = this.peers.get(id);
-          if (!p) return;
-          const now = performance.now();
-          if (p.strikes > 0 && now - p.lastStrike > AC_CFG.STRIKE_DECAY_MS) {
-            p.strikes--;
-            p.lastStrike = now;
-          }
-          if (p.suspicion > 0)
-            p.suspicion = Math.max(
-              0,
-              p.suspicion - AC_CFG.SUSPICION_DECAY * dtSec,
-            );
-        }
-
-        issueToken(id) {
-          const p = this.ensure(id);
-          p.token = randomToken(16);
-          p.sigRequiredAt = performance.now() + AC_CFG.SIG_GRACE_MS;
-          return p.token;
-        }
-        setMyToken(tok) {
-          this.myToken = tok;
-        }
-
-        sign(fields) {
-          const s = `${this.myToken}|${this.seq}|${fields.m[0]}|${fields.m[1]}|${fields.a[0]}|${fields.a[1]}|${fields.f}`;
-          return fnv1a(s);
-        }
-        verify(id, payload) {
-          const p = this.peers.get(id);
-          if (!p || !p.token) return false;
-          const s = `${p.token}|${payload.seq}|${payload.m[0]}|${payload.m[1]}|${payload.a[0]}|${payload.a[1]}|${payload.f}`;
-          return fnv1a(s) === payload.sig;
-        }
-
-        validateInput(id, data) {
-          if (this.bans.has(id)) return false;
-          const p = this.ensure(id);
-          const now = performance.now();
-          p.lastUpdate = now;
-
-          let size = 0;
-          try {
-            size = JSON.stringify(data).length;
-          } catch {
-            return this.strike(id, "unserializable", AC_CFG.STRIKE_SEVERE);
-          }
-          if (size > AC_CFG.MAX_PACKET_BYTES)
-            return this.strike(id, `oversized ${size}B`, AC_CFG.STRIKE_SEVERE);
-
-          if (!data || typeof data !== "object")
-            return this.strike(id, "not object", AC_CFG.STRIKE_SEVERE);
-          if (!this.pair(data.m) || !this.pair(data.a))
-            return this.strike(id, "bad vectors", AC_CFG.STRIKE_SEVERE);
-          if (typeof data.f !== "number" || (data.f !== 0 && data.f !== 1))
-            return this.strike(id, "bad fire", AC_CFG.STRIKE_SEVERE);
-          if (typeof data.seq !== "number" || !Number.isFinite(data.seq))
-            return this.strike(id, "no seq", AC_CFG.STRIKE_SEVERE);
-
-          p.inputTimes.push(now);
-          while (p.inputTimes.length && now - p.inputTimes[0] > 1000)
-            p.inputTimes.shift();
-          if (p.inputTimes.length > AC_CFG.MAX_INPUT_HZ)
-            return this.strike(
-              id,
-              `flood ${p.inputTimes.length}/s`,
-              AC_CFG.STRIKE_SEVERE,
-            );
-
-          if (data.seq <= p.lastSeq)
-            return this.strike(
-              id,
-              `replay seq ${data.seq}<=${p.lastSeq}`,
-              AC_CFG.STRIKE_SEVERE,
-            );
-          if (p.lastSeq >= 0 && data.seq > p.lastSeq + AC_CFG.MAX_SEQ_GAP)
-            return this.strike(id, `seq jump ${data.seq - p.lastSeq}`, 1);
-          p.lastSeq = data.seq;
-
-          if (p.token && now > p.sigRequiredAt && !this.verify(id, data))
-            return this.strike(id, "bad signature", AC_CFG.STRIKE_SEVERE);
-
-          const clip = (v) => {
-            const L = Math.hypot(v[0], v[1]);
-            if (L > 1.05) {
-              v[0] /= L;
-              v[1] /= L;
-            }
-            if (L < AC_CFG.AIM_MIN_MAG && v === data.a) {
-              v[0] = 1;
-              v[1] = 0;
-            }
-            if (L < 0.001) {
-              v[0] = 0;
-              v[1] = 0;
-            }
-          };
-          clip(data.m);
-          clip(data.a);
-          return true;
-        }
-
-        pair(v) {
-          return (
-            Array.isArray(v) &&
-            v.length === 2 &&
-            Number.isFinite(v[0]) &&
-            Number.isFinite(v[1]) &&
-            Math.abs(v[0]) <= 10 &&
-            Math.abs(v[1]) <= 10
-          );
-        }
-
-        validateMovement(id, prev, next, dt) {
-          if (!prev) return { x: next.x, y: next.y };
-          const dx = next.x - prev.x,
-            dy = next.y - prev.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist > AC_CFG.TELEPORT_HARD) {
-            this.strike(
-              id,
-              `teleport ${dist.toFixed(0)}px`,
-              AC_CFG.STRIKE_SEVERE,
-            );
-            return { x: prev.x, y: prev.y };
-          }
-          const maxD = CFG.SPEED * dt * AC_CFG.SPEED_TOLERANCE + 8;
-          if (dist > maxD) {
-            this.strike(id, `speed ${dist.toFixed(0)}>${maxD.toFixed(0)}`, 1);
-            const k = maxD / dist;
-            return { x: prev.x + dx * k, y: prev.y + dy * k };
-          }
-          return { x: next.x, y: next.y };
-        }
-
-        validateFire(id, now, fireCd) {
-          const p = this.ensure(id);
-          const min = fireCd * AC_CFG.FIRE_TOLERANCE;
-          if (now - p.lastFire < min)
-            return this.strike(
-              id,
-              `rapid fire ${(now - p.lastFire).toFixed(0)}ms`,
-              1,
-            );
-          p.lastFire = now;
-          return true;
-        }
-
-        validateBulletOrigin(x, y, walls, r) {
-          for (const w of walls) {
-            if (
-              x > w.x - r &&
-              x < w.x + w.w + r &&
-              y > w.y - r &&
-              y < w.y + w.h + r
-            )
-              return false;
-          }
-          return true;
-        }
-
-        recordAim(id, ax, ay, now) {
-          const p = this.ensure(id);
-          const last = p.aimHistory[p.aimHistory.length - 1];
-          if (last) {
-            const dt = now - last.t;
-            if (dt < AC_CFG.AIM_SNAP_WINDOW_MS) {
-              const dot = last.ax * ax + last.ay * ay;
-              const ang =
-                (Math.acos(Math.max(-1, Math.min(1, dot))) * 180) / Math.PI;
-              if (ang > AC_CFG.AIM_SNAP_DEG) p.suspicion += 1.5;
-            }
-          }
-          p.aimHistory.push({ ax, ay, t: now });
-          while (
-            p.aimHistory.length &&
-            now - p.aimHistory[0].t > AC_CFG.AIM_HISTORY_MS
-          ) {
-            p.aimHistory.shift();
-          }
-        }
-
-        recordShot(id, hit) {
-          const p = this.ensure(id);
-          p.shotsFired++;
-          if (hit) p.shotsHit++;
-          if (p.shotsFired >= AC_CFG.ACCURACY_MIN_SHOTS) {
-            const acc = p.shotsHit / p.shotsFired;
-            if (acc > AC_CFG.ACCURACY_SUSPICIOUS) p.suspicion += 0.6;
-          }
-        }
-
-        computeVisible(forId, all, walls, localPos) {
-          if (!AC_CFG.FOG_ENABLED) return Object.keys(all);
-          const R2 = AC_CFG.FOG_RADIUS * AC_CFG.FOG_RADIUS;
-          const out = [];
-          for (const id in all) {
-            if (id === forId) {
-              out.push(id);
-              continue;
-            }
-            const p = all[id];
-            const dx = p.x - localPos.x,
-              dy = p.y - localPos.y;
-            if (dx * dx + dy * dy > R2) continue;
-            if (lineOfSight(localPos.x, localPos.y, p.x, p.y, walls))
-              out.push(id);
-          }
-          return out;
-        }
-
-        recordPosition(id, x, y) {
-          let h = this.histories.get(id);
-          if (!h) {
-            h = [];
-            this.histories.set(id, h);
-          }
-          const now = performance.now();
-          h.push({ x, y, t: now });
-          const cut = now - AC_CFG.HISTORY_MS;
-          while (h.length && h[0].t < cut) h.shift();
-        }
-
-        rewindPosition(id, backMs) {
-          const h = this.histories.get(id);
-          if (!h || h.length === 0) return null;
-          const target =
-            performance.now() - Math.min(backMs, AC_CFG.MAX_REWIND_MS);
-          let lo = 0,
-            hi = h.length - 1;
-          while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (h[mid].t < target) lo = mid + 1;
-            else hi = mid;
-          }
-          return h[lo];
-        }
-
-        tick(dtSec) {
-          const now = performance.now();
-          for (const [id, p] of this.peers) {
-            this.decay(id, dtSec);
-            const idle = now - p.lastUpdate;
-            if (idle > AC_CFG.PEER_TIMEOUT_MS) {
-              if (!p._idleLogged) {
-                p._idleLogged = true;
-                acLog(`⏸ ${id.slice(0, 6)} idle ${(idle / 1000).toFixed(0)}s`);
-              }
-            } else if (p._idleLogged) {
-              p._idleLogged = false;
-              acLog(`▶ ${id.slice(0, 6)} resumed`);
-            }
-          }
-        }
+  ensure(id){
+    let p = this.peers.get(id)
+    if (!p) {
+      p = {
+        strikes:0, lastStrike:0, suspicion:0,
+        lastUpdate:performance.now(),
+        inputTimes:[], lastSeq:-1, token:null, sigRequiredAt:0,
+        lastFire:0, shotsFired:0, shotsHit:0,
+        aimHistory:[], lastPos:null, lastPosT:0, rtt:100,
+        pubHash:null, pubJwk:null, verified:false,
+        nonce:null, nonceSentAt:0,
       }
+      this.peers.set(id, p)
+    }
+    return p
+  }
+  remove(id){ this.peers.delete(id); this.histories.delete(id) }
 
-      /* ============================================================
+  strike(id, reason, w=1){
+    const p = this.ensure(id)
+    p.strikes += w
+    p.lastStrike = performance.now()
+    acLog(`⚡ ${id.slice(0,6)} ${reason} (${p.strikes}/${AC_CFG.STRIKE_KICK})`)
+    if (p.strikes >= AC_CFG.STRIKE_KICK) { this.ban(id, reason); return false }
+    return true
+  }
+  ban(id, reason, persistent=false){
+    if (this.bans.has(id)) return
+    this.bans.add(id)
+    const p = this.peers.get(id)
+    if (persistent && p && p.pubHash) {
+      this.addPersistentBan(p.pubHash)
+      acLog(`⛔ PERMABAN ${p.pubHash.slice(0,6)}: ${reason}`)
+    } else {
+      acLog(`⛔ BAN ${id.slice(0,6)}: ${reason}`)
+    }
+    this.scene.onAntiCheatBan?.(id, reason, persistent)
+  }
+  decay(id, dtSec){
+    const p = this.peers.get(id); if (!p) return
+    const now = performance.now()
+    if (p.strikes > 0 && now - p.lastStrike > AC_CFG.STRIKE_DECAY_MS) {
+      p.strikes--; p.lastStrike = now
+    }
+    if (p.suspicion > 0) p.suspicion = Math.max(0, p.suspicion - AC_CFG.SUSPICION_DECAY * dtSec)
+  }
+
+  issueToken(id){
+    const p = this.ensure(id)
+    p.token = randomToken(16)
+    p.sigRequiredAt = performance.now() + AC_CFG.SIG_GRACE_MS
+    return p.token
+  }
+  setMyToken(tok){ this.myToken = tok }
+
+  sign(fields){
+    const s = `${this.myToken}|${this.seq}|${fields.m[0]}|${fields.m[1]}|${fields.a[0]}|${fields.a[1]}|${fields.f}`
+    return fnv1a(s)
+  }
+  verify(id, payload){
+    const p = this.peers.get(id); if (!p || !p.token) return false
+    const s = `${p.token}|${payload.seq}|${payload.m[0]}|${payload.m[1]}|${payload.a[0]}|${payload.a[1]}|${payload.f}`
+    return fnv1a(s) === payload.sig
+  }
+
+  validateInput(id, data){
+    if (this.bans.has(id)) return false
+    const p = this.ensure(id)
+    const now = performance.now()
+    p.lastUpdate = now
+
+    let size = 0
+    try { size = JSON.stringify(data).length } catch { return this.strike(id,'unserializable',AC_CFG.STRIKE_SEVERE) }
+    if (size > AC_CFG.MAX_PACKET_BYTES) return this.strike(id, `oversized ${size}B`, AC_CFG.STRIKE_SEVERE)
+
+    if (!data || typeof data !== 'object') return this.strike(id, 'not object', AC_CFG.STRIKE_SEVERE)
+    if (!this.pair(data.m) || !this.pair(data.a)) return this.strike(id, 'bad vectors', AC_CFG.STRIKE_SEVERE)
+    if (typeof data.f !== 'number' || (data.f !== 0 && data.f !== 1)) return this.strike(id, 'bad fire', AC_CFG.STRIKE_SEVERE)
+    if (typeof data.seq !== 'number' || !Number.isFinite(data.seq)) return this.strike(id, 'no seq', AC_CFG.STRIKE_SEVERE)
+
+    p.inputTimes.push(now)
+    while (p.inputTimes.length && now - p.inputTimes[0] > 1000) p.inputTimes.shift()
+    if (p.inputTimes.length > AC_CFG.MAX_INPUT_HZ)
+      return this.strike(id, `flood ${p.inputTimes.length}/s`, AC_CFG.STRIKE_SEVERE)
+
+    if (data.seq <= p.lastSeq)
+      return this.strike(id, `replay seq ${data.seq}<=${p.lastSeq}`, AC_CFG.STRIKE_SEVERE)
+    if (p.lastSeq >= 0 && data.seq > p.lastSeq + AC_CFG.MAX_SEQ_GAP)
+      return this.strike(id, `seq jump ${data.seq - p.lastSeq}`, 1)
+    p.lastSeq = data.seq
+
+    if (p.token && now > p.sigRequiredAt && !this.verify(id, data))
+      return this.strike(id, 'bad signature', AC_CFG.STRIKE_SEVERE)
+
+    const clip = v => {
+      const L = Math.hypot(v[0], v[1])
+      if (L > 1.05) { v[0] /= L; v[1] /= L }
+      if (L < AC_CFG.AIM_MIN_MAG && v === data.a) { v[0] = 1; v[1] = 0 }
+      if (L < 0.001) { v[0] = 0; v[1] = 0 }
+    }
+    clip(data.m); clip(data.a)
+    return true
+  }
+
+  pair(v){
+    return Array.isArray(v) && v.length === 2 &&
+      Number.isFinite(v[0]) && Number.isFinite(v[1]) &&
+      Math.abs(v[0]) <= 10 && Math.abs(v[1]) <= 10
+  }
+
+  validateMovement(id, prev, next, dt){
+    if (!prev) return { x: next.x, y: next.y }
+    const dx = next.x - prev.x, dy = next.y - prev.y
+    const dist = Math.hypot(dx, dy)
+    if (dist > AC_CFG.TELEPORT_HARD) {
+      this.strike(id, `teleport ${dist.toFixed(0)}px`, AC_CFG.STRIKE_SEVERE)
+      return { x: prev.x, y: prev.y }
+    }
+    const maxD = CFG.SPEED * dt * AC_CFG.SPEED_TOLERANCE + 8
+    if (dist > maxD) {
+      this.strike(id, `speed ${dist.toFixed(0)}>${maxD.toFixed(0)}`, 1)
+      const k = maxD / dist
+      return { x: prev.x + dx*k, y: prev.y + dy*k }
+    }
+    return { x: next.x, y: next.y }
+  }
+
+  validateFire(id, now, fireCd){
+    const p = this.ensure(id)
+    const min = fireCd * AC_CFG.FIRE_TOLERANCE
+    if (now - p.lastFire < min)
+      return this.strike(id, `rapid fire ${(now - p.lastFire).toFixed(0)}ms`, 1)
+    p.lastFire = now
+    return true
+  }
+
+  recordAim(id, ax, ay, now){
+    const p = this.ensure(id)
+    const last = p.aimHistory[p.aimHistory.length-1]
+    if (last){
+      const dt = now - last.t
+      if (dt < AC_CFG.AIM_SNAP_WINDOW_MS){
+        const dot = last.ax*ax + last.ay*ay
+        const ang = Math.acos(Math.max(-1, Math.min(1, dot))) * 180/Math.PI
+        if (ang > AC_CFG.AIM_SNAP_DEG) p.suspicion += 1.5
+      }
+    }
+    p.aimHistory.push({ ax, ay, t: now })
+    while (p.aimHistory.length && now - p.aimHistory[0].t > AC_CFG.AIM_HISTORY_MS) {
+      p.aimHistory.shift()
+    }
+  }
+
+  recordShot(id, hit){
+    const p = this.ensure(id)
+    p.shotsFired++
+    if (hit) p.shotsHit++
+    if (p.shotsFired >= AC_CFG.ACCURACY_MIN_SHOTS){
+      const acc = p.shotsHit / p.shotsFired
+      if (acc > AC_CFG.ACCURACY_SUSPICIOUS) p.suspicion += 0.6
+    }
+  }
+
+  computeVisible(forId, all, walls, localPos){
+    if (!AC_CFG.FOG_ENABLED) return Object.keys(all)
+    const R2 = AC_CFG.FOG_RADIUS * AC_CFG.FOG_RADIUS
+    const out = []
+    for (const id in all){
+      if (id === forId){ out.push(id); continue }
+      const p = all[id]
+      const dx = p.x - localPos.x, dy = p.y - localPos.y
+      if (dx*dx + dy*dy > R2) continue
+      if (lineOfSight(localPos.x, localPos.y, p.x, p.y, walls)) out.push(id)
+    }
+    return out
+  }
+
+  recordPosition(id, x, y){
+    let h = this.histories.get(id)
+    if (!h){ h = []; this.histories.set(id, h) }
+    const now = performance.now()
+    h.push({ x, y, t: now })
+    const cut = now - AC_CFG.HISTORY_MS
+    while (h.length && h[0].t < cut) h.shift()
+  }
+
+  rewindPosition(id, backMs){
+    const h = this.histories.get(id)
+    if (!h || h.length === 0) return null
+    const target = performance.now() - Math.min(backMs, AC_CFG.MAX_REWIND_MS)
+    let lo = 0, hi = h.length - 1
+    while (lo < hi){ const mid = (lo + hi) >> 1; if (h[mid].t < target) lo = mid+1; else hi = mid }
+    return h[lo]
+  }
+
+  tick(dtSec){
+    const now = performance.now()
+    for (const [id, p] of this.peers){
+      this.decay(id, dtSec)
+      const idle = now - p.lastUpdate
+      if (idle > AC_CFG.PEER_TIMEOUT_MS){
+        if (!p._idleLogged){
+          p._idleLogged = true
+          acLog(`⏸ ${id.slice(0,6)} idle ${(idle/1000).toFixed(0)}s`)
+        }
+      } else if (p._idleLogged){
+        p._idleLogged = false
+        acLog(`▶ ${id.slice(0,6)} resumed`)
+      }
+    }
+  }
+}
+
+/* ============================================================
    6. LAG COMP
    ============================================================ */
-      function hostSimulateShot(
-        ac,
-        shooterId,
-        shooterPos,
-        aim,
-        targets,
-        walls,
-      ) {
-        const { x, y } = shooterPos;
-        const len = Math.hypot(aim[0], aim[1]) || 1;
-        const ax = aim[0] / len,
-          ay = aim[1] / len;
+function hostSimulateShot(ac, shooterId, shooterPos, aim, targets, walls){
+  const { x, y } = shooterPos
+  const len = Math.hypot(aim[0], aim[1]) || 1
+  const ax = aim[0]/len, ay = aim[1]/len
 
-        ac.recordAim(shooterId, ax, ay, performance.now());
+  ac.recordAim(shooterId, ax, ay, performance.now())
 
-        const p = ac.ensure(shooterId);
-        const rewindMs = Math.min(p.rtt, AC_CFG.MAX_REWIND_MS);
+  const p = ac.ensure(shooterId)
+  const rewindMs = Math.min(p.rtt, AC_CFG.MAX_REWIND_MS)
 
-        let bestHit = null,
-          bestDist = Infinity;
-        for (const tid in targets) {
-          if (tid === shooterId) continue;
-          const t = targets[tid];
-          if (t.dead) continue;
-          const rw = ac.rewindPosition(tid, rewindMs);
-          const tx = rw ? rw.x : t.x;
-          const ty = rw ? rw.y : t.y;
-          if (!lineOfSight(x, y, tx, ty, walls)) continue;
-          const dx = tx - x,
-            dy = ty - y;
-          const proj = dx * ax + dy * ay;
-          if (proj < 0 || proj > CFG.BULLET_SPEED * CFG.BULLET_LIFE) continue;
-          const px = x + ax * proj,
-            py = y + ay * proj;
-          const miss = Math.hypot(tx - px, ty - py);
-          if (miss < CFG.PLAYER_R && proj < bestDist) {
-            bestDist = proj;
-            bestHit = tid;
-          }
-        }
-        ac.recordShot(shooterId, !!bestHit);
-        return bestHit;
-      }
+  let bestHit = null, bestDist = Infinity
+  for (const tid in targets){
+    if (tid === shooterId) continue
+    const t = targets[tid]
+    if (t.dead) continue
+    const rw = ac.rewindPosition(tid, rewindMs)
+    const tx = rw ? rw.x : t.x
+    const ty = rw ? rw.y : t.y
+    if (!lineOfSight(x, y, tx, ty, walls)) continue
+    const dx = tx - x, dy = ty - y
+    const proj = dx*ax + dy*ay
+    if (proj < 0 || proj > CFG.BULLET_SPEED * CFG.BULLET_LIFE) continue
+    const px = x + ax*proj, py = y + ay*proj
+    const miss = Math.hypot(tx-px, ty-py)
+    if (miss < CFG.PLAYER_R && proj < bestDist){ bestDist = proj; bestHit = tid }
+  }
+  ac.recordShot(shooterId, !!bestHit)
+  return bestHit
+}
 
-      /* ============================================================
+/* ============================================================
    7. КАРТА
    ============================================================ */
-      const SPAWNS = [
-        { x: 120, y: 120 },
-        { x: CFG.W - 120, y: 120 },
-        { x: 120, y: CFG.H - 120 },
-        { x: CFG.W - 120, y: CFG.H - 120 },
-        { x: CFG.W / 2, y: 120 },
-        { x: CFG.W / 2, y: CFG.H - 120 },
-      ];
-      function generateWalls(seedStr) {
-        const rng = mulberry32(hashStr(seedStr));
-        const cs = CFG.CELL;
-        const cols = Math.floor(CFG.W / cs),
-          rows = Math.floor(CFG.H / cs);
-        const used = new Set(),
-          out = [];
-        const push = (c, r) => {
-          const k = c + "," + r;
-          if (used.has(k)) return;
-          used.add(k);
-          out.push({ x: c * cs, y: r * cs, w: cs, h: cs });
-        };
-        for (let c = 0; c < cols; c++) {
-          push(c, 0);
-          push(c, rows - 1);
-        }
-        for (let r = 0; r < rows; r++) {
-          push(0, r);
-          push(cols - 1, r);
-        }
-        const nearSpawn = (x, y) => {
-          for (const s of SPAWNS) {
-            if (Math.abs(s.x - x) < 140 && Math.abs(s.y - y) < 140) return true;
-          }
-          return false;
-        };
-        for (let i = 0; i < 60; i++) {
-          const c = 2 + Math.floor(rng() * (cols - 4));
-          const r = 2 + Math.floor(rng() * (rows - 4));
-          const len = 1 + Math.floor(rng() * 3);
-          const horiz = rng() < 0.5;
-          for (let j = 0; j < len; j++) {
-            const cc = horiz ? c + j : c,
-              rr = horiz ? r : r + j;
-            if (cc >= cols - 1 || rr >= rows - 1) break;
-            if (nearSpawn(cc * cs + cs / 2, rr * cs + cs / 2)) continue;
-            push(cc, rr);
-          }
-        }
-        return out;
-      }
+const SPAWNS = [
+  {x:120,y:120},{x:CFG.W-120,y:120},
+  {x:120,y:CFG.H-120},{x:CFG.W-120,y:CFG.H-120},
+  {x:CFG.W/2,y:120},{x:CFG.W/2,y:CFG.H-120},
+]
+function generateWalls(seedStr){
+  const rng = mulberry32(hashStr(seedStr))
+  const cs = CFG.CELL
+  const cols = Math.floor(CFG.W/cs), rows = Math.floor(CFG.H/cs)
+  const used = new Set(), out = []
+  const push = (c,r) => { const k=c+','+r; if (used.has(k)) return; used.add(k); out.push({x:c*cs,y:r*cs,w:cs,h:cs}) }
+  for (let c=0;c<cols;c++){ push(c,0); push(c,rows-1) }
+  for (let r=0;r<rows;r++){ push(0,r); push(cols-1,r) }
+  const nearSpawn = (x,y) => { for (const s of SPAWNS){ if (Math.abs(s.x-x)<140 && Math.abs(s.y-y)<140) return true } return false }
+  for (let i=0;i<60;i++){
+    const c = 2 + Math.floor(rng()*(cols-4))
+    const r = 2 + Math.floor(rng()*(rows-4))
+    const len = 1 + Math.floor(rng()*3)
+    const horiz = rng() < 0.5
+    for (let j=0;j<len;j++){
+      const cc = horiz ? c+j : c, rr = horiz ? r : r+j
+      if (cc >= cols-1 || rr >= rows-1) break
+      if (nearSpawn(cc*cs+cs/2, rr*cs+cs/2)) continue
+      push(cc, rr)
+    }
+  }
+  return out
+}
 
-      /* ============================================================
+/* ============================================================
    8. BOOT SCENE
    ============================================================ */
-      class BootScene extends Phaser.Scene {
-        constructor() {
-          super("Boot");
-        }
-        create() {
-          const g = this.make.graphics({ x: 0, y: 0, add: false });
-          g.fillStyle(0xffffff, 1);
-          g.fillCircle(24, 24, 18);
-          g.fillRect(38, 18, 18, 12);
-          g.generateTexture("player", 56, 48);
-          g.clear();
-          g.fillStyle(0xffe066, 1);
-          g.fillCircle(6, 6, 5);
-          g.generateTexture("bullet", 12, 12);
-          g.clear();
-          g.fillStyle(0x27303c, 1);
-          g.fillRect(0, 0, 40, 40);
-          g.lineStyle(2, 0x3d4b5c, 1);
-          g.strokeRect(1, 1, 38, 38);
-          g.generateTexture("wall", 40, 40);
-          g.clear();
-          g.fillStyle(0x121821, 1);
-          g.fillRect(0, 0, 80, 80);
-          g.lineStyle(1, 0x1b2431, 1);
-          g.strokeRect(0, 0, 80, 80);
-          g.generateTexture("floor", 80, 80);
-          g.clear();
-          g.destroy();
-          this.scene.start("Game");
-        }
-      }
+class BootScene extends Phaser.Scene {
+  constructor(){ super('Boot') }
+  create(){
+    const g = this.make.graphics({x:0,y:0,add:false})
+    g.fillStyle(0xffffff,1); g.fillCircle(24,24,18); g.fillRect(38,18,18,12)
+    g.generateTexture('player',56,48); g.clear()
+    g.fillStyle(0xffe066,1); g.fillCircle(6,6,5)
+    g.generateTexture('bullet',12,12); g.clear()
+    g.fillStyle(0x27303c,1); g.fillRect(0,0,40,40)
+    g.lineStyle(2,0x3d4b5c,1); g.strokeRect(1,1,38,38)
+    g.generateTexture('wall',40,40); g.clear()
+    g.fillStyle(0x121821,1); g.fillRect(0,0,80,80)
+    g.lineStyle(1,0x1b2431,1); g.strokeRect(0,0,80,80)
+    g.generateTexture('floor',80,80); g.clear()
+    g.destroy()
+    this.scene.start('Game')
+  }
+}
 
-      /* ============================================================
+/* ============================================================
    9. ИГРОВАЯ СЦЕНА
    ============================================================ */
-      class GameScene extends Phaser.Scene {
-        constructor() {
-          super("Game");
-        }
+class GameScene extends Phaser.Scene {
+  constructor(){ super('Game') }
 
-        create() {
-          this.roomId = this.registry.get("roomId") || "arena1";
-          this.identity = this.registry.get("identity");
+  create(){
+    this.roomId = this.registry.get('roomId') || 'arena1'
+    this.identity = this.registry.get('identity')
 
-          DBG.log("GAME", "scene created", { roomId: this.roomId });
+    DBG.log('GAME', 'scene created', { roomId: this.roomId })
 
-          /* карта */
-          this.add
-            .tileSprite(0, 0, CFG.W, CFG.H, "floor")
-            .setOrigin(0)
-            .setDepth(-20);
-          this.wallRects = generateWalls(this.roomId);
-          for (const r of this.wallRects) {
-            this.add
-              .image(r.x, r.y, "wall")
-              .setOrigin(0)
-              .setDepth(-10)
-              .setDisplaySize(r.w, r.h);
-          }
+    /* карта */
+    this.add.tileSprite(0,0,CFG.W,CFG.H,'floor').setOrigin(0).setDepth(-20)
+    this.wallRects = generateWalls(this.roomId)
+    for (const r of this.wallRects){
+      this.add.image(r.x,r.y,'wall').setOrigin(0).setDepth(-10).setDisplaySize(r.w,r.h)
+    }
 
-          /* камера */
-          this.cameras.main.setBounds(0, 0, CFG.W, CFG.H);
-          this.cameras.main.setBackgroundColor("#0b0e13");
+    /* камера */
+    this.cameras.main.setBounds(0,0,CFG.W,CFG.H)
+    this.cameras.main.setBackgroundColor('#0b0e13')
 
-          /* состояние */
-          this.views = {};
-          this.ghostBullets = {};
-          this.inputs = {};
-          this.worldPlayers = {};
-          this.bullets = [];
-          this.bulletSeq = 0;
-          this.lastStateSent = 0;
-          this.lastInputSent = 0;
-          this.lastAcTick = 0;
-          this._lastPing = 0;
-          this._lastVisibleCalc = 0;
-          this._visibleCache = {};
-          this.scores = {};
+    /* Адаптивный zoom под размер экрана */
+    this.updateCameraZoom()
+    this.scale.on('resize', () => this.updateCameraZoom())
 
-          /* голосование */
-          this.hostBlacklist = new Set();
-          this.votes = new Map();
-          this.voteActive = false;
-          this.voteTarget = null;
-          this.voteDeadline = 0;
+    /* состояние */
+    this.views = {}
+    this.ghostBullets = {}
+    this.inputs = {}
+    this.worldPlayers = {}
+    this.bullets = []
+    this.bulletSeq = 0
+    this.lastStateSent = 0
+    this.lastInputSent = 0
+    this.lastAcTick = 0
+    this._lastPing = 0
+    this._lastVisibleCalc = 0
+    this._visibleCache = {}
+    this.scores = {}
+    this._lastLocalShot = 0
+    this._lastPingSentAt = 0
 
-          /* WebSocket */
-          this.ws = null;
-          this.peers = new Set();
-          this.isHost = false;
-          this.myPeerId = null;
-          this.hasBecomeClient = false;
-          this.serverHostId = null;
-          this.reconnectAttempts = 0;
+    /* голосование */
+    this.hostBlacklist = new Set()
+    this.votes = new Map()
+    this.voteActive = false
+    this.voteTarget = null
+    this.voteDeadline = 0
 
-          /* локальное состояние */
-          this.local = {
-            x: SPAWNS[0].x,
-            y: SPAWNS[0].y,
-            aimX: 1,
-            aimY: 0,
-            hp: CFG.MAX_HP,
-            dead: false,
-            score: 0,
-          };
-          this.predicted = { x: this.local.x, y: this.local.y };
+    /* WebSocket */
+    this.ws = null
+    this.peers = new Set()
+    this.isHost = false
+    this.myPeerId = null
+    this.hasBecomeClient = false
+    this.serverHostId = null
+    this.reconnectAttempts = 0
 
-          /* античит + identity */
-          this.ac = new AntiCheat(this);
-          this.ac.identity = this.identity;
+    /* локальное состояние */
+    this.local = { x:SPAWNS[0].x, y:SPAWNS[0].y, aimX:1, aimY:0, hp:CFG.MAX_HP, dead:false, score:0 }
+    this.predicted = { x:this.local.x, y:this.local.y }
 
-          /* HUD */
-          this.statusEl = document.getElementById("status");
-          this.scoresEl = document.getElementById("scores");
-          this.voteBtn = document.getElementById("voteBtn");
-          this.voteInfo = document.getElementById("voteInfo");
-          this.voteBtn.style.display = "";
-          this.voteBtn.addEventListener("click", () => this.onVoteClick());
+    /* античит + identity */
+    this.ac = new AntiCheat(this)
+    this.ac.identity = this.identity
 
-          this.setupJoysticks();
+    /* HUD */
+    this.statusEl = document.getElementById('status')
+    this.scoresEl = document.getElementById('scores')
+    this.voteBtn  = document.getElementById('voteBtn')
+    this.voteInfo = document.getElementById('voteInfo')
+    this.voteBtn.style.display = ''
+    this.voteBtn.addEventListener('click', ()=> this.onVoteClick())
 
-          /* ВАЖНО: myPeerId задаём ДО createView, чтобы migrateMyId нашёл view */
-          this.myPeerId = "local_" + randomToken(4);
-          this.createView(this.myPeerId);
+    this.setupJoysticks()
 
-          this.setupNetwork();
+    this.myPeerId = 'local_' + randomToken(4)
+    this.createView(this.myPeerId)
 
-          DBG.banner("GAME READY", "#3fb950");
-        }
+    this.setupNetwork()
 
-        /* =========== INPUT =========== */
-        setupJoysticks() {
-          this.moveVec = { x: 0, y: 0 };
-          this.aimVec = { x: 1, y: 0 };
-          this.firing = false;
+    DBG.banner('GAME READY', '#3fb950')
+  }
 
-          const joyL = nipplejs.create({
-            zone: document.getElementById("joyL"),
-            mode: "static",
-            position: { left: "50%", top: "50%" },
-            color: "#3d7dff",
-            size: 110,
-            threshold: 0.1,
-          });
-          joyL.on("move", (e, d) => {
-            const f = Math.min(d.force, 1);
-            this.moveVec.x = Math.cos(d.angle.radian) * f;
-            this.moveVec.y = -Math.sin(d.angle.radian) * f;
-          });
-          joyL.on("end", () => {
-            this.moveVec.x = 0;
-            this.moveVec.y = 0;
-          });
+  /* =========== ADAPTIVE CAMERA =========== */
+  updateCameraZoom(){
+    const w = this.scale.width
+    const h = this.scale.height
+    const shortSide = Math.min(w, h)
 
-          const joyR = nipplejs.create({
-            zone: document.getElementById("joyR"),
-            mode: "static",
-            position: { left: "50%", top: "50%" },
-            color: "#ff5c5c",
-            size: 110,
-            threshold: 0.1,
-          });
-          joyR.on("start", () => {
-            this.firing = true;
-          });
-          joyR.on("move", (e, d) => {
-            const f = Math.min(d.force, 1);
-            const ax = Math.cos(d.angle.radian),
-              ay = -Math.sin(d.angle.radian);
-            if (f > 0.15) {
-              this.aimVec.x = ax;
-              this.aimVec.y = ay;
-            }
-            this.firing = f > 0.25;
-          });
-          joyR.on("end", () => {
-            this.firing = false;
-          });
-        }
+    /* Сколько world-пикселей видно по короткой стороне экрана.
+       700 — золотая середина для карты 1200×800.
+       Меньше — крупнее игрок и меньше обзор.
+       Больше — мельче игрок и больше обзор. */
+    const worldView = 700
 
-        /* ============================================================
-     NETWORK — WebSocket Relay
+    const zoom = clamp(shortSide / worldView, 0.5, 3.0)
+    this.cameras.main.setZoom(zoom)
+    DBG.log('CAM', 'viewport:', w + '×' + h, 'zoom:', zoom.toFixed(2))
+  }
+
+  /* =========== INPUT =========== */
+  setupJoysticks(){
+    this.moveVec = { x:0, y:0 }
+    this.aimVec = { x:1, y:0 }
+    this.firing = false
+
+    const joyL = nipplejs.create({
+      zone: document.getElementById('joyL'),
+      mode:'static', position:{left:'50%',top:'50%'},
+      color:'#3d7dff', size:110, threshold:0.1,
+    })
+    joyL.on('move', (e,d)=>{
+      const f = Math.min(d.force,1)
+      this.moveVec.x = Math.cos(d.angle.radian)*f
+      this.moveVec.y = -Math.sin(d.angle.radian)*f
+    })
+    joyL.on('end', ()=>{ this.moveVec.x=0; this.moveVec.y=0 })
+
+    const joyR = nipplejs.create({
+      zone: document.getElementById('joyR'),
+      mode:'static', position:{left:'50%',top:'50%'},
+      color:'#ff5c5c', size:110, threshold:0.1,
+    })
+    joyR.on('start', ()=>{ this.firing = true })
+    joyR.on('move', (e,d)=>{
+      const f = Math.min(d.force,1)
+      const ax = Math.cos(d.angle.radian), ay = -Math.sin(d.angle.radian)
+      if (f > 0.15){ this.aimVec.x = ax; this.aimVec.y = ay }
+      this.firing = f > 0.25
+    })
+    joyR.on('end', ()=>{ this.firing = false })
+  }
+
+  /* ============================================================
+     NETWORK
      ============================================================ */
-        setupNetwork() {
-          DBG.log("NET", "connecting to relay...");
-          DBG.log("NET", "URL:", RELAY_URL);
-          DBG.log("NET", "room:", this.roomId);
+  setupNetwork(){
+    DBG.log('NET', 'connecting to relay...')
+    DBG.log('NET', 'URL:', RELAY_URL)
+    DBG.log('NET', 'room:', this.roomId)
 
-          this.handlers = {
-            in: (d, id) => this.onNetInput(d, id),
-            st: (d, id) => this.onNetState(d, id),
-            bl: (d, id) => this.onNetBullet(d, id),
-            hit: (d, id) => this.onNetHit(d, id),
-            tok: (d, id) => this.onNetToken(d, id),
-            ban: (d, id) => this.onNetBan(d, id),
-            png: (d, id) => this.onNetPing(d, id),
-            id: (d, id) => this.onNetIdentity(d, id),
-            vote: (d, id) => this.onNetVote(d, id),
-          };
+    this.handlers = {
+      in:   (d, id) => this.onNetInput(d, id),
+      st:   (d, id) => this.onNetState(d, id),
+      bl:   (d, id) => this.onNetBullet(d, id),
+      hit:  (d, id) => this.onNetHit(d, id),
+      tok:  (d, id) => this.onNetToken(d, id),
+      ban:  (d, id) => this.onNetBan(d, id),
+      png:  (d, id) => this.onNetPing(d, id),
+      id:   (d, id) => this.onNetIdentity(d, id),
+      vote: (d, id) => this.onNetVote(d, id),
+    }
 
-          this.connectToRelay();
+    this.connectToRelay()
 
-          setTimeout(() => {
-            const n = this.peers.size + (this.myPeerId ? 1 : 0);
-            const ok = n > 1;
-            DBG.banner(
-              `DIAG 30s: peers=${n} role=${this.isHost ? "HOST" : this.hasBecomeClient ? "CLIENT" : "WAIT"}`,
-              ok ? "#3fb950" : "#f85149",
-            );
-            DBG.log("DIAG", "myPeerId   :", this.myPeerId);
-            DBG.log("DIAG", "serverHost :", this.serverHostId);
-            DBG.log(
-              "DIAG",
-              "ws state   :",
-              this.ws ? this.ws.readyState : "no ws",
-            );
-            DBG.log("DIAG", "peers      :", [...this.peers]);
-          }, 30000);
-        }
+    setTimeout(()=>{
+      const n = this.peers.size + (this.myPeerId ? 1 : 0)
+      const ok = n > 1
+      DBG.banner(
+        `DIAG 30s: peers=${n} role=${this.isHost?'HOST':(this.hasBecomeClient?'CLIENT':'WAIT')}`,
+        ok ? '#3fb950' : '#f85149'
+      )
+      DBG.log('DIAG', 'myPeerId   :', this.myPeerId)
+      DBG.log('DIAG', 'serverHost :', this.serverHostId)
+      DBG.log('DIAG', 'ws state   :', this.ws ? this.ws.readyState : 'no ws')
+      DBG.log('DIAG', 'peers      :', [...this.peers])
+    }, 30000)
+  }
 
-        connectToRelay() {
-          try {
-            this.ws = new WebSocket(RELAY_URL);
-          } catch (e) {
-            DBG.err("NET", "WebSocket constructor failed:", e);
-            return;
+  connectToRelay(){
+    try {
+      this.ws = new WebSocket(RELAY_URL)
+    } catch(e){
+      DBG.err('NET', 'WebSocket constructor failed:', e)
+      return
+    }
+
+    this.ws.onopen = () => {
+      DBG.log('NET', '*** WS CONNECTED ***')
+      DBG.banner('WS CONNECTED', '#3fb950')
+      this.reconnectAttempts = 0
+      this.ws.send(JSON.stringify({ type: 'join', room: this.roomId }))
+    }
+
+    this.ws.onmessage = ev => {
+      let msg
+      try { msg = JSON.parse(ev.data) } catch { return }
+
+      DBG.log('NET', '📩 recv:', msg.type || msg.a)
+
+      const { type } = msg
+
+      /* --- Системные сообщения --- */
+      if (type === 'banned'){
+        DBG.err('NET', '🚫 SERVER BANNED YOU:', msg.reason)
+        DBG.banner('BANNED: ' + msg.reason, '#f85149')
+        try { this.ws.close() } catch {}
+        alert('Вас забанил сервер античита: ' + msg.reason)
+        return
+      }
+      if (type === 'error'){
+        DBG.warn('NET', 'server error:', msg.msg)
+        return
+      }
+
+      /* ---- WELCOME ---- */
+      if (type === 'welcome'){
+        this.serverHostId = msg.host
+        DBG.log('NET', '*** WELCOMED ***', msg.peerId, 'host:', msg.host, 'peers:', msg.peers)
+        DBG.banner('YOU ARE: ' + msg.peerId, '#2f81f7')
+
+        this.migrateMyId(msg.peerId)
+
+        const iAmHost = (msg.host === msg.peerId)
+
+        if (iAmHost){
+          DBG.log('NET', 'I AM HOST (server assigned)')
+          this.isHost = true
+          this.hasBecomeClient = false
+          this.sendId({ pubHash: this.identity.pubHash, mode: this.identity.mode }, this.myPeerId)
+          this.becomeHost()
+          DBG.banner('YOU ARE HOST', '#d29922')
+        } else {
+          DBG.log('NET', 'I AM CLIENT, host =', msg.host)
+          this.isHost = false
+          this.hasBecomeClient = true
+
+          for (const peerId of msg.peers){
+            if (peerId === this.myPeerId) continue
+            this.peers.add(peerId)
+            if (!this.views[peerId]) this.createView(peerId)
+            this.ac.ensure(peerId)
+            DBG.log('NET', 'added existing peer:', peerId)
           }
 
-          this.ws.onopen = () => {
-            DBG.log("NET", "*** WS CONNECTED ***");
-            DBG.banner("WS CONNECTED", "#3fb950");
-            this.reconnectAttempts = 0;
-            this.ws.send(JSON.stringify({ type: "join", room: this.roomId }));
-          };
-
-          this.ws.onmessage = (ev) => {
-            let msg;
-            try {
-              msg = JSON.parse(ev.data);
-            } catch {
-              return;
-            }
-
-            DBG.log("NET", "📩 recv:", msg.type || msg.a);
-
-            const { type } = msg;
-
-            /* --- Системные сообщения от сервера-античита --- */
-            if (type === "banned") {
-              DBG.err("NET", "🚫 SERVER BANNED YOU:", msg.reason);
-              DBG.banner("BANNED: " + msg.reason, "#f85149");
-              try {
-                this.ws.close();
-              } catch {}
-              alert("Вас забанил сервер античита: " + msg.reason);
-              return;
-            }
-            if (type === "error") {
-              DBG.warn("NET", "server error:", msg.msg);
-              return;
-            }
-
-            /* ---- WELCOME ---- */
-            if (type === "welcome") {
-              this.serverHostId = msg.host;
-              DBG.log(
-                "NET",
-                "*** WELCOMED ***",
-                msg.peerId,
-                "host:",
-                msg.host,
-                "peers:",
-                msg.peers,
-              );
-              DBG.banner("YOU ARE: " + msg.peerId, "#2f81f7");
-
-              this.migrateMyId(msg.peerId);
-
-              const iAmHost = msg.host === msg.peerId;
-
-              if (iAmHost) {
-                DBG.log("NET", "I AM HOST (server assigned)");
-                this.isHost = true;
-                this.hasBecomeClient = false;
-                this.sendId(
-                  { pubHash: this.identity.pubHash, mode: this.identity.mode },
-                  this.myPeerId,
-                );
-                this.becomeHost();
-                DBG.banner("YOU ARE HOST", "#d29922");
-              } else {
-                DBG.log("NET", "I AM CLIENT, host =", msg.host);
-                this.isHost = false;
-                this.hasBecomeClient = true;
-
-                /* Добавляем всех существующих пиров (включая хоста) */
-                for (const peerId of msg.peers) {
-                  if (peerId === this.myPeerId) continue;
-                  this.peers.add(peerId);
-                  if (!this.views[peerId]) this.createView(peerId);
-                  this.ac.ensure(peerId);
-                  DBG.log("NET", "added existing peer:", peerId);
-                }
-
-                if (msg.host) {
-                  this.sendId(
-                    {
-                      pubHash: this.identity.pubHash,
-                      mode: this.identity.mode,
-                    },
-                    msg.host,
-                  );
-                  this.sendTok({ request: true }, msg.host);
-                  this.sendId(
-                    { challenge: "hello-from-" + this.myPeerId },
-                    msg.host,
-                  );
-                }
-              }
-
-              this.updateStatus();
-              return;
-            }
-
-            /* ---- PEER JOIN ---- */
-            if (type === "peer-join") {
-              DBG.log("PEER", "🎉 peer joined:", msg.peerId);
-              this.peers.add(msg.peerId);
-              if (!this.views[msg.peerId]) this.createView(msg.peerId);
-              this.ac.ensure(msg.peerId);
-
-              if (this.isHost) {
-                this.addPlayerToWorld(msg.peerId);
-
-                const p = this.ac.ensure(msg.peerId);
-                p.nonce = randomToken(12);
-                p.nonceSentAt = performance.now();
-                this.sendId({ challenge: p.nonce }, msg.peerId);
-                this.sendTok(
-                  { token: this.ac.issueToken(msg.peerId) },
-                  msg.peerId,
-                );
-              }
-              this.updateStatus();
-              return;
-            }
-
-            /* ---- PEER LEAVE ---- */
-            if (type === "peer-leave") {
-              DBG.log("PEER", "👋 peer left:", msg.peerId);
-              this.peers.delete(msg.peerId);
-              this.onPeerLeft(msg.peerId);
-              this.updateStatus();
-              return;
-            }
-
-            /* ---- HOST CHANGE ---- */
-            if (type === "host-change") {
-              DBG.log("NET", "*** HOST CHANGED *** →", msg.host);
-              this.serverHostId = msg.host;
-              if (msg.host === this.myPeerId) {
-                DBG.log("NET", "I am new host");
-                this.isHost = true;
-                this.hasBecomeClient = false;
-                this.becomeHost();
-                DBG.banner("YOU ARE HOST", "#d29922");
-              } else {
-                this.isHost = false;
-                this.hasBecomeClient = true;
-              }
-              this.updateStatus();
-              return;
-            }
-
-            /* ---- ОБЫЧНОЕ ИГРОВОЕ СООБЩЕНИЕ ---- */
-            const action = msg.a;
-            const fromId = msg.from;
-            const data = msg.d;
-            const h = this.handlers[action];
-            if (h) h(data, fromId);
-          };
-
-          this.ws.onerror = (err) => {
-            DBG.err("NET", "WS error:", err);
-          };
-
-          this.ws.onclose = (ev) => {
-            DBG.warn("NET", "WS closed, code:", ev.code);
-            if (this.reconnectAttempts < 30) {
-              this.reconnectAttempts++;
-              const delay = Math.min(2000 * this.reconnectAttempts, 10000);
-              DBG.log(
-                "NET",
-                `reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`,
-              );
-              setTimeout(() => this.connectToRelay(), delay);
-            }
-          };
-        }
-
-        migrateMyId(newId) {
-          const oldId = this.myPeerId;
-          if (oldId === newId) return;
-          DBG.log(
-            "NET",
-            "my id:",
-            oldId?.slice(0, 12) || "?",
-            "→",
-            newId.slice(0, 12),
-          );
-          const v = this.views[oldId];
-          if (v) {
-            this.views[newId] = v;
-            delete this.views[oldId];
-            DBG.log(
-              "NET",
-              "view migrated:",
-              oldId?.slice(0, 12),
-              "→",
-              newId.slice(0, 12),
-            );
-          } else {
-            DBG.warn("NET", "no view found for old id", oldId);
-          }
-          this.myPeerId = newId;
-          this.updateStatus();
-        }
-
-        /* =========== SEND =========== */
-        sendTo(action, data, peerId) {
-          if (!this.ws || this.ws.readyState !== 1) return;
-          this.ws.send(
-            JSON.stringify({ to: peerId, data: { a: action, d: data } }),
-          );
-        }
-
-        broadcast(action, data) {
-          if (!this.ws || this.ws.readyState !== 1) return;
-          this.ws.send(JSON.stringify({ data: { a: action, d: data } }));
-        }
-
-        sendInput(d, id) {
-          this.sendTo("in", d, id);
-        }
-        sendState(d, id) {
-          this.sendTo("st", d, id);
-        }
-        sendBullet(d) {
-          this.broadcast("bl", d);
-        }
-        sendHit(d) {
-          this.broadcast("hit", d);
-        }
-        sendTok(d, id) {
-          this.sendTo("tok", d, id);
-        }
-        sendBan(d, id) {
-          this.sendTo("ban", d, id);
-        }
-        sendPing(d, id) {
-          this.sendTo("png", d, id);
-        }
-        sendId(d, id) {
-          this.sendTo("id", d, id);
-        }
-        sendVote(d) {
-          if (this.isHost) {
-            this.broadcast("vote", d);
-          } else {
-            const hostId = this.currentHostId();
-            if (hostId && hostId !== this.myPeerId)
-              this.sendTo("vote", d, hostId);
+          if (msg.host){
+            this.sendId({ pubHash: this.identity.pubHash, mode: this.identity.mode }, msg.host)
+            this.sendTok({ request: true }, msg.host)
+            this.sendId({ challenge: 'hello-from-' + this.myPeerId }, msg.host)
           }
         }
 
-        /* =========== HANDLERS =========== */
-        onNetInput(data, fromId) {
-          if (!this.isHost) return;
-          if (this.ac.bans.has(fromId)) return;
-          if (!this.ac.validateInput(fromId, data)) return;
-          data._t = performance.now();
-          this.inputs[fromId] = data;
+        this.updateStatus()
+        return
+      }
+
+      /* ---- PEER JOIN ---- */
+      if (type === 'peer-join'){
+        DBG.log('PEER', '🎉 peer joined:', msg.peerId)
+        this.peers.add(msg.peerId)
+        if (!this.views[msg.peerId]) this.createView(msg.peerId)
+        this.ac.ensure(msg.peerId)
+
+        if (this.isHost){
+          this.addPlayerToWorld(msg.peerId)
+          const p = this.ac.ensure(msg.peerId)
+          p.nonce = randomToken(12)
+          p.nonceSentAt = performance.now()
+          this.sendId({ challenge: p.nonce }, msg.peerId)
+          this.sendTok({ token: this.ac.issueToken(msg.peerId) }, msg.peerId)
         }
-        onNetState(data) {
-          if (this.isHost) return;
-          this.applyState(data);
+        this.updateStatus()
+        return
+      }
+
+      /* ---- PEER LEAVE ---- */
+      if (type === 'peer-leave'){
+        DBG.log('PEER', '👋 peer left:', msg.peerId)
+        this.peers.delete(msg.peerId)
+        this.onPeerLeft(msg.peerId)
+        this.updateStatus()
+        return
+      }
+
+      /* ---- HOST CHANGE ---- */
+      if (type === 'host-change'){
+        DBG.log('NET', '*** HOST CHANGED *** →', msg.host)
+        this.serverHostId = msg.host
+        if (msg.host === this.myPeerId){
+          DBG.log('NET', 'I am new host')
+          this.isHost = true
+          this.hasBecomeClient = false
+          this.becomeHost()
+          DBG.banner('YOU ARE HOST', '#d29922')
+        } else {
+          this.isHost = false
+          this.hasBecomeClient = true
         }
-        onNetBullet(data) {
-          if (this.isHost) return;
-          this.spawnGhostBullet(data);
+        this.updateStatus()
+        return
+      }
+
+      /* ---- ОБЫЧНОЕ ИГРОВОЕ ---- */
+      const action = msg.a
+      const fromId = msg.from
+      const data = msg.d
+      const h = this.handlers[action]
+      if (h) h(data, fromId)
+    }
+
+    this.ws.onerror = err => DBG.err('NET', 'WS error:', err)
+
+    this.ws.onclose = ev => {
+      DBG.warn('NET', 'WS closed, code:', ev.code)
+      if (this.reconnectAttempts < 30){
+        this.reconnectAttempts++
+        const delay = Math.min(2000 * this.reconnectAttempts, 10000)
+        DBG.log('NET', `reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`)
+        setTimeout(()=> this.connectToRelay(), delay)
+      }
+    }
+  }
+
+  migrateMyId(newId){
+    const oldId = this.myPeerId
+    if (oldId === newId) return
+    DBG.log('NET', 'my id:', oldId?.slice(0,12) || '?', '→', newId.slice(0,12))
+    const v = this.views[oldId]
+    if (v){
+      this.views[newId] = v
+      delete this.views[oldId]
+      DBG.log('NET', 'view migrated:', oldId?.slice(0,12), '→', newId.slice(0,12))
+    } else {
+      DBG.warn('NET', 'no view found for old id', oldId)
+    }
+    this.myPeerId = newId
+    this.updateStatus()
+  }
+
+  /* =========== SEND =========== */
+  sendTo(action, data, peerId){
+    if (!this.ws || this.ws.readyState !== 1) return
+    this.ws.send(JSON.stringify({ to: peerId, data: { a: action, d: data } }))
+  }
+
+  broadcast(action, data){
+    if (!this.ws || this.ws.readyState !== 1) return
+    this.ws.send(JSON.stringify({ data: { a: action, d: data } }))
+  }
+
+  sendInput  (d, id) { this.sendTo('in', d, id) }
+  sendState  (d, id) { this.sendTo('st', d, id) }
+  sendBullet (d)     { this.broadcast('bl', d) }
+  sendHit    (d)     { this.broadcast('hit', d) }
+  sendTok    (d, id) { this.sendTo('tok', d, id) }
+  sendBan    (d, id) { this.sendTo('ban', d, id) }
+  sendPing   (d, id) { this.sendTo('png', d, id) }
+  sendId     (d, id) { this.sendTo('id', d, id) }
+  sendVote   (d){
+    if (this.isHost){
+      this.broadcast('vote', d)
+    } else {
+      const hostId = this.currentHostId()
+      if (hostId && hostId !== this.myPeerId) this.sendTo('vote', d, hostId)
+    }
+  }
+
+  /* =========== HANDLERS =========== */
+  onNetInput(data, fromId){
+    if (!this.isHost) return
+    if (this.ac.bans.has(fromId)) return
+    if (!this.ac.validateInput(fromId, data)) return
+    data._t = performance.now()
+    this.inputs[fromId] = data
+  }
+  onNetState(data){
+    if (this.isHost) return
+    this.applyState(data)
+  }
+  onNetBullet(data){
+    if (this.isHost) return
+    if (data.owner === this.myPeerId && this.ghostBullets[data.id]) return
+    this.spawnGhostBullet(data)
+  }
+  onNetHit(data){
+    if (this.isHost) return
+    this.applyHit(data)
+  }
+  onNetToken(data, fromId){
+    if (data.request){
+      if (this.isHost){
+        const tok = this.ac.issueToken(fromId)
+        this.sendTok({ token: tok }, fromId)
+      }
+    } else if (data.token){
+      this.ac.setMyToken(data.token)
+      DBG.log('ID', 'token received from host')
+    }
+  }
+  onNetBan(data){
+    if (data.full){
+      if (Array.isArray(data.bans)) for (const id of data.bans) this.ac.bans.add(id)
+      if (Array.isArray(data.pbans)){
+        for (const h of data.pbans) this.ac.persistentBans.add(h)
+        this.ac.savePersistentBans()
+      }
+    } else if (data.id){
+      this.ac.bans.add(data.id)
+      if (data.pubHash) { this.ac.persistentBans.add(data.pubHash); this.ac.savePersistentBans() }
+      this.onAntiCheatBan(data.id, data.reason || 'banned', !!data.pubHash)
+    }
+  }
+  onNetPing(data, fromId){
+    if (data.pong){
+      if (this.isHost){
+        const p = this.ac.ensure(fromId)
+        p.rtt = performance.now() - data.t
+        p.lastUpdate = performance.now()
+      }
+    } else {
+      this._lastPingSentAt = performance.now()
+      this.sendPing({ t:data.t, pong:1 }, fromId)
+    }
+  }
+  async onNetIdentity(data, fromId){
+    if (data.challenge){
+      const sig = await this.identity.sign(data.challenge)
+      this.sendId({
+        pubJwk: this.identity.pubJwk || null,
+        pubHash: this.identity.pubHash,
+        sig,
+        mode: this.identity.mode,
+      }, fromId)
+    } else if (data.pubHash){
+      if (!this.isHost) return
+      const p = this.ac.ensure(fromId)
+      p.pubHash = data.pubHash
+      p.pubJwk = data.pubJwk
+      if (data.mode === 'crypto' && data.pubJwk && data.sig){
+        const ok = await this.identity.verify(data.pubJwk, p.nonce || '', data.sig)
+        p.verified = ok
+      }
+      if (this.ac.isPersistentlyBanned(data.pubHash)){
+        this.ac.ban(fromId, 'persistent ban', false)
+        return
+      }
+      acLog(`✓ ${fromId.slice(0,6)} id:${(data.pubHash||'?').slice(0,6)}${p.verified?' v':''}`)
+    }
+  }
+  onNetVote(data, fromId){
+    if (this.isHost && fromId !== this.myPeerId){
+      for (const peerId of this.peers){
+        if (peerId !== fromId) this.sendTo('vote', data, peerId)
+      }
+    }
+    if (data.kind === 'start')      this.beginVote(data.target, fromId)
+    else if (data.kind === 'cast')  this.castVote(fromId, data.agree)
+    else if (data.kind === 'blacklist'){
+      this.hostBlacklist.add(data.id)
+      this.updateStatus()
+    }
+  }
+
+  onPeerLeft(id){
+    DBG.log('PEER', '👋 onPeerLeft', id.slice(0,12))
+    delete this.inputs[id]
+    delete this.worldPlayers[id]
+    delete this.scores[id]
+    this.destroyView(id)
+    this.ac.remove(id)
+    this.votes.delete(id)
+    if (this.voteTarget === id) this.endVote()
+  }
+
+  /* =========== HOST =========== */
+  currentHostId(){
+    if (this.isHost) return this.myPeerId
+    return this.serverHostId
+  }
+
+  addPlayerToWorld(id){
+    if (!id) return
+    if (this.worldPlayers[id]) return
+
+    const v = this.views[id]
+    const idx = Object.keys(this.worldPlayers).length
+    const spawn = SPAWNS[idx % SPAWNS.length]
+
+    this.worldPlayers[id] = {
+      x: (v && v.init && (v.tx || v.ty)) ? v.tx : spawn.x,
+      y: (v && v.init && (v.tx || v.ty)) ? v.ty : spawn.y,
+      vx: 0, vy: 0,
+      aimX: 1, aimY: 0,
+      hp: CFG.MAX_HP,
+      dead: false,
+      fireAt: 0, respawnAt: 0,
+      score: 0,
+    }
+
+    if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
+
+    DBG.log('HOST', 'added player to world:', id.slice(0,12),
+      'at', this.worldPlayers[id].x, this.worldPlayers[id].y)
+  }
+
+  becomeHost(){
+    DBG.log('HOST', 'becomeHost() called')
+
+    const myCurX = this.predicted.x
+    const myCurY = this.predicted.y
+    const meWasInitialized = Math.abs(myCurX) > 1 || Math.abs(myCurY) > 1
+
+    this.worldPlayers = {}
+    const ids = [this.myPeerId, ...this.peers].filter(id => id && !this.ac.bans.has(id))
+
+    for (const id of ids){
+      const v = this.views[id]
+      const spawn = SPAWNS[ids.indexOf(id) % SPAWNS.length]
+      const useViewPos = v && v.init && (Math.abs(v.tx) > 1 || Math.abs(v.ty) > 1)
+
+      this.worldPlayers[id] = {
+        x: useViewPos ? v.tx : spawn.x,
+        y: useViewPos ? v.ty : spawn.y,
+        vx: 0, vy: 0,
+        aimX: 1, aimY: 0,
+        hp: v ? v.hp : CFG.MAX_HP,
+        dead: v ? v.dead : false,
+        fireAt: 0, respawnAt: 0,
+        score: 0,
+      }
+
+      if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
+    }
+
+    const me = this.worldPlayers[this.myPeerId]
+    if (me){
+      if (meWasInitialized){
+        me.x = myCurX
+        me.y = myCurY
+      } else {
+        const s = SPAWNS[0]
+        me.x = s.x
+        me.y = s.y
+      }
+
+      this.local.x = me.x
+      this.local.y = me.y
+      this.predicted.x = me.x
+      this.predicted.y = me.y
+
+      const v = this.views[this.myPeerId]
+      if (v){
+        v.tx = me.x
+        v.ty = me.y
+        v.sprite.x = me.x
+        v.sprite.y = me.y
+        v.init = true
+      }
+    }
+
+    for (const peerId of this.peers){
+      this.sendBan({
+        full: true,
+        bans: [...this.ac.bans],
+        pbans: [...this.ac.persistentBans],
+      }, peerId)
+    }
+
+    acLog(`👑 хост: ${this.myPeerId.slice(0,6)}`)
+    this.updateStatus()
+  }
+
+  /* =========== VOTE =========== */
+  onVoteClick(){
+    const hostId = this.currentHostId()
+    if (!hostId || hostId === this.myPeerId){ acLog('✖ ты хост'); return }
+
+    if (this.voteActive && this.voteTarget === hostId){
+      const already = this.votes.has(this.myPeerId)
+      this.castVote(this.myPeerId, !already)
+      this.sendVote({ kind:'cast', agree: !already })
+      return
+    }
+
+    this.beginVote(hostId, this.myPeerId)
+    this.sendVote({ kind:'start', target: hostId })
+  }
+
+  beginVote(targetHost, initiator){
+    if (this.voteActive) return
+    this.voteActive = true
+    this.voteTarget = targetHost
+    this.voteDeadline = performance.now() + VOTE_DURATION_MS
+    this.votes.clear()
+    if (initiator) this.votes.set(initiator, targetHost)
+    acLog(`🗳 голосование: сменить ${targetHost.slice(0,6)}`)
+    this.updateVoteUI()
+  }
+
+  castVote(voter, agree){
+    if (!this.voteActive || !this.voteTarget) return
+    if (agree) this.votes.set(voter, this.voteTarget)
+    else this.votes.delete(voter)
+    this.checkVoteResult()
+    this.updateVoteUI()
+  }
+
+  checkVoteResult(){
+    if (!this.voteActive) return
+    const total = 1 + this.peers.size
+    const yes = this.votes.size
+    const passed = yes > total / 2
+    const failed = performance.now() > this.voteDeadline
+    if (passed){
+      this.hostBlacklist.add(this.voteTarget)
+      this.sendVote({ kind:'blacklist', id: this.voteTarget })
+      acLog(`✅ ${this.voteTarget.slice(0,6)} снят (${yes}/${total})`)
+      this.endVote()
+    } else if (failed){
+      acLog(`✖ провал (${yes}/${total})`)
+      this.endVote()
+    }
+  }
+
+  endVote(){
+    this.voteActive = false
+    this.voteTarget = null
+    this.votes.clear()
+    this.voteBtn.classList.remove('armed')
+    this.updateVoteUI()
+  }
+
+  updateVoteUI(){
+    if (!this.voteInfo || !this.voteBtn) return
+    if (!this.voteActive){
+      this.voteInfo.textContent = ''
+      this.voteBtn.classList.remove('armed')
+      return
+    }
+    const total = 1 + this.peers.size
+    const yes = this.votes.size
+    this.voteInfo.textContent = `VOTE ${yes}/${total}\nцель: ${(this.voteTarget||'').slice(0,6)}`
+    this.voteBtn.classList.toggle('armed', this.votes.has(this.myPeerId))
+  }
+
+  /* =========== STATUS =========== */
+  updateStatus(){
+    if (!this.statusEl) return
+    const n = this.peers.size + (this.myPeerId ? 1 : 0)
+    const role = this.isHost ? 'HOST' : (this.hasBecomeClient ? 'CLIENT' : 'WAIT')
+    const hp = Math.max(0, Math.round(this.local.hp))
+    const pid = (this.identity?.pubHash || '?').slice(0,8)
+    const sc = this.local.score || 0
+
+    let ping = 0
+    if (this.isHost){
+      let sum = 0, cnt = 0
+      for (const [, p] of this.ac.peers){
+        if (p.rtt > 0){ sum += p.rtt; cnt++ }
+      }
+      ping = cnt ? Math.round(sum / cnt) : 0
+    } else if (this._lastPingSentAt){
+      ping = Math.round(performance.now() - this._lastPingSentAt)
+    }
+
+    this.statusEl.textContent = `${role} · ${this.roomId} · игроков: ${n} · HP: ${hp} · очки: ${sc} · ping: ${ping}ms`
+  }
+
+  renderScores(){
+    if (!this.scoresEl) return
+    if (!this.scores || Object.keys(this.scores).length === 0){
+      this.scoresEl.textContent = ''
+      return
+    }
+
+    const rows = []
+    for (const id in this.scores){
+      const score = this.scores[id]
+      const v = this.views[id]
+      const isMe = id === this.myPeerId
+      const dead = v ? v.dead : false
+      rows.push({ id, score, isMe, dead })
+    }
+    rows.sort((a,b) => b.score - a.score)
+
+    let html = '🏆 СЧЁТ\n'
+    for (let i = 0; i < rows.length; i++){
+      const r = rows[i]
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  '
+      const tag = r.isMe ? ' (я)' : ''
+      const cls = r.isMe ? 'me' : (r.dead ? 'dead' : '')
+      html += `<span class="${cls}">${medal} ${r.id.slice(0,6)}${tag} · ${r.score}</span>\n`
+    }
+    this.scoresEl.innerHTML = html
+  }
+
+  /* =========== STATE =========== */
+  applyState(data){
+    if (!data || !data.p) return
+
+    if (data.scores){
+      this.scores = data.scores
+      if (this.myPeerId && this.scores[this.myPeerId] !== undefined){
+        this.local.score = this.scores[this.myPeerId]
+      }
+    }
+
+    for (const id in data.p){
+      const [x,y,ax,ay,hp,dead] = data.p[id]
+      if (id === this.myPeerId){
+        this.local.hp = hp
+        this.local.dead = !!dead
+        const dx = x - this.predicted.x, dy = y - this.predicted.y
+        if (Math.abs(dx) > 120 || Math.abs(dy) > 120){
+          this.predicted.x = x; this.predicted.y = y
+        } else {
+          this.predicted.x += dx * 0.15
+          this.predicted.y += dy * 0.15
         }
-        onNetHit(data) {
-          if (this.isHost) return;
-          this.applyHit(data);
+      } else {
+        let v = this.views[id]
+        if (!v){ v = this.createView(id); v.tx = x; v.ty = y; v.init = true; v.sprite.x = x; v.sprite.y = y }
+        if (!v.buffer) v.buffer = []
+        v.buffer.push({ x, y, ax, ay, hp, dead, t: performance.now() })
+        while (v.buffer.length > 15) v.buffer.shift()
+        v.tx = x; v.ty = y
+        v.hp = hp; v.dead = !!dead
+      }
+    }
+    for (const id in this.views){
+      if (id !== this.myPeerId && !(id in data.p)) this.destroyView(id)
+    }
+  }
+
+  spawnGhostBullet(d){
+    if (this.ghostBullets[d.id]) return
+    const s = this.add.image(d.x, d.y, 'bullet').setDepth(5)
+    this.ghostBullets[d.id] = { sprite:s, vx:d.vx, vy:d.vy, born:this.time.now }
+  }
+
+  applyHit(d){
+    if (d.bid && this.ghostBullets[d.bid]){
+      this.ghostBullets[d.bid].sprite.destroy()
+      delete this.ghostBullets[d.bid]
+    }
+    if (d.target === this.myPeerId){
+      this.local.hp = d.hp
+      this.local.dead = !!d.dead
+      this.cameras.main.flash(90, 120, 0, 0)
+    }
+    const v = this.views[d.target]
+    if (v){
+      v.hp = d.hp; v.dead = !!d.dead
+      v.sprite.setTintFill(0xffffff)
+      this.time.delayedCall(60, ()=>{ if (v.sprite && v.sprite.active) v.sprite.setTint(colorFromId(d.target)) })
+    }
+    if (d.by === this.myPeerId) this.cameras.main.shake(50, 0.002)
+  }
+
+  /* =========== VIEWS =========== */
+  createView(id){
+    if (this.views[id]) return this.views[id]
+    const sprite = this.add.image(0,0,'player').setDepth(10).setTint(colorFromId(id))
+    const bar = this.add.graphics().setDepth(11)
+    this.views[id] = { sprite, bar, hp:CFG.MAX_HP, dead:false, tx:0, ty:0, ta:0, init:false, buffer:[] }
+    return this.views[id]
+  }
+  destroyView(id){
+    const v = this.views[id]; if (!v) return
+    v.sprite.destroy(); v.bar.destroy(); delete this.views[id]
+  }
+
+  /* =========== UPDATE =========== */
+  update(time, delta){
+    const dt = Math.min(delta, 50) / 1000
+
+    if (time - this.lastAcTick > 250){
+      const dtAc = (time - this.lastAcTick) / 1000
+      this.lastAcTick = time
+      this.ac.tick(dtAc)
+    }
+    if (this.voteActive) this.checkVoteResult()
+
+    if (!this.local.dead){
+      const nx = this.predicted.x + this.moveVec.x * CFG.SPEED * dt
+      const ny = this.predicted.y + this.moveVec.y * CFG.SPEED * dt
+      const p = this.resolveWorld(nx, ny)
+      this.predicted.x = p.x; this.predicted.y = p.y
+    }
+    this.local.x = this.predicted.x
+    this.local.y = this.predicted.y
+    this.local.aimX = this.aimVec.x
+    this.local.aimY = this.aimVec.y
+
+    /* Клиент отправляет ввод хосту */
+    if (!this.isHost && time - this.lastInputSent > CFG.INPUT_MS){
+      this.lastInputSent = time
+      const hostId = this.currentHostId()
+      if (hostId && hostId !== this.myPeerId){
+        this.ac.seq++
+        const payload = {
+          seq: this.ac.seq,
+          m: [this.moveVec.x, this.moveVec.y],
+          a: [this.aimVec.x, this.aimVec.y],
+          f: this.firing ? 1 : 0,
+          d: this.local.dead ? 1 : 0,
         }
-        onNetToken(data, fromId) {
-          if (data.request) {
-            if (this.isHost) {
-              const tok = this.ac.issueToken(fromId);
-              this.sendTok({ token: tok }, fromId);
-            }
-          } else if (data.token) {
-            this.ac.setMyToken(data.token);
-            DBG.log("ID", "token received from host");
-          }
-        }
-        onNetBan(data) {
-          if (data.full) {
-            if (Array.isArray(data.bans))
-              for (const id of data.bans) this.ac.bans.add(id);
-            if (Array.isArray(data.pbans)) {
-              for (const h of data.pbans) this.ac.persistentBans.add(h);
-              this.ac.savePersistentBans();
-            }
-          } else if (data.id) {
-            this.ac.bans.add(data.id);
-            if (data.pubHash) {
-              this.ac.persistentBans.add(data.pubHash);
-              this.ac.savePersistentBans();
-            }
-            this.onAntiCheatBan(
-              data.id,
-              data.reason || "banned",
-              !!data.pubHash,
-            );
-          }
-        }
-        onNetPing(data, fromId) {
-          if (data.pong) {
-            if (this.isHost) {
-              const p = this.ac.ensure(fromId);
-              p.rtt = performance.now() - data.t;
-              p.lastUpdate = performance.now();
-            }
-          } else {
-            this.sendPing({ t: data.t, pong: 1 }, fromId);
-          }
-        }
-        async onNetIdentity(data, fromId) {
-          if (data.challenge) {
-            const sig = await this.identity.sign(data.challenge);
-            this.sendId(
-              {
-                pubJwk: this.identity.pubJwk || null,
-                pubHash: this.identity.pubHash,
-                sig,
-                mode: this.identity.mode,
-              },
-              fromId,
-            );
-          } else if (data.pubHash) {
-            if (!this.isHost) return;
-            const p = this.ac.ensure(fromId);
-            p.pubHash = data.pubHash;
-            p.pubJwk = data.pubJwk;
-            if (data.mode === "crypto" && data.pubJwk && data.sig) {
-              const ok = await this.identity.verify(
-                data.pubJwk,
-                p.nonce || "",
-                data.sig,
-              );
-              p.verified = ok;
-            }
-            if (this.ac.isPersistentlyBanned(data.pubHash)) {
-              this.ac.ban(fromId, "persistent ban", false);
-              return;
-            }
-            acLog(
-              `✓ ${fromId.slice(0, 6)} id:${(data.pubHash || "?").slice(0, 6)}${p.verified ? " v" : ""}`,
-            );
-          }
-        }
-        onNetVote(data, fromId) {
-          if (this.isHost && fromId !== this.myPeerId) {
-            for (const peerId of this.peers) {
-              if (peerId !== fromId) this.sendTo("vote", data, peerId);
-            }
-          }
-          if (data.kind === "start") this.beginVote(data.target, fromId);
-          else if (data.kind === "cast") this.castVote(fromId, data.agree);
-          else if (data.kind === "blacklist") {
-            this.hostBlacklist.add(data.id);
-            this.updateStatus();
-          }
-        }
+        payload.sig = this.ac.sign(payload)
+        this.sendInput(payload, hostId)
+      }
+    }
 
-        onPeerLeft(id) {
-          DBG.log("PEER", "👋 onPeerLeft", id.slice(0, 12));
-          delete this.inputs[id];
-          delete this.worldPlayers[id];
-          delete this.scores[id];
-          this.destroyView(id);
-          this.ac.remove(id);
-          this.votes.delete(id);
-          if (this.voteTarget === id) this.endVote();
-        }
+    if (this.isHost){
+      this.inputs[this.myPeerId] = {
+        m: [this.moveVec.x, this.moveVec.y],
+        a: [this.aimVec.x, this.aimVec.y],
+        f: this.firing ? 1 : 0,
+        d: this.local.dead ? 1 : 0,
+        _t: time,
+      }
+      this.simulateHost(time, dt)
+    }
 
-        /* =========== HOST =========== */
-        currentHostId() {
-          if (this.isHost) return this.myPeerId;
-          return this.serverHostId;
-        }
+    /* Локальное предсказание пуль у клиента */
+    if (!this.isHost && this.firing && time - this._lastLocalShot > CFG.FIRE_CD && !this.local.dead){
+      this._lastLocalShot = time
+      const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
+      const ax = this.aimVec.x / len
+      const ay = this.aimVec.y / len
+      const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
+      this.spawnGhostBullet({
+        id,
+        x: this.local.x + ax * (CFG.PLAYER_R + 6),
+        y: this.local.y + ay * (CFG.PLAYER_R + 6),
+        vx: ax * CFG.BULLET_SPEED,
+        vy: ay * CFG.BULLET_SPEED,
+        owner: this.myPeerId,
+      })
+    }
 
-        addPlayerToWorld(id) {
-          if (!id) return;
-          if (this.worldPlayers[id]) return;
+    this.updateGhostBullets(time, dt)
+    this.renderPlayers(time, dt)
+    if (time % 200 < 20){ this.updateStatus(); this.updateVoteUI(); this.renderScores() }
+  }
 
-          const v = this.views[id];
-          const idx = Object.keys(this.worldPlayers).length;
-          const spawn = SPAWNS[idx % SPAWNS.length];
+  resolveWorld(x, y){
+    x = clamp(x, CFG.PLAYER_R, CFG.W-CFG.PLAYER_R)
+    y = clamp(y, CFG.PLAYER_R, CFG.H-CFG.PLAYER_R)
+    for (const r of this.wallRects){
+      const res = resolveCircleRect(x, y, CFG.PLAYER_R, r)
+      if (res){ x = res.x; y = res.y }
+    }
+    return { x, y }
+  }
 
-          this.worldPlayers[id] = {
-            x: v && v.init && (v.tx || v.ty) ? v.tx : spawn.x,
-            y: v && v.init && (v.tx || v.ty) ? v.ty : spawn.y,
-            vx: 0,
-            vy: 0,
-            aimX: 1,
-            aimY: 0,
-            hp: CFG.MAX_HP,
-            dead: false,
-            fireAt: 0,
-            respawnAt: 0,
-            score: 0,
-          };
+  /* =========== HOST SIM =========== */
+  simulateHost(time, dt){
+    for (const id in this.worldPlayers){
+      const p = this.worldPlayers[id]
+      let inp = this.inputs[id] || { m:[0,0], a:[1,0], f:0 }
 
-          if (!this.inputs[id])
-            this.inputs[id] = { m: [0, 0], a: [1, 0], f: 0 };
+      const lastInputAge = time - (inp._t || 0)
+      if (lastInputAge > 500 && id !== this.myPeerId){
+        inp = { m:[0,0], a: inp.a || [1,0], f: 0 }
+      }
 
-          DBG.log(
-            "HOST",
-            "added player to world:",
-            id.slice(0, 12),
-            "at",
-            this.worldPlayers[id].x,
-            this.worldPlayers[id].y,
-          );
-        }
+      if (p.dead){
+        if (time > p.respawnAt){
+          const sp = SPAWNS[Math.floor(Math.random()*SPAWNS.length)]
+          p.x = sp.x; p.y = sp.y; p.hp = CFG.MAX_HP; p.dead = false; p.vx = 0; p.vy = 0
+        } else continue
+      }
 
-        becomeHost() {
-          DBG.log("HOST", "becomeHost() called");
+      const prev = { x:p.x, y:p.y }
+      p.vx = (inp.m[0]||0) * CFG.SPEED
+      p.vy = (inp.m[1]||0) * CFG.SPEED
+      const nx = p.x + p.vx*dt, ny = p.y + p.vy*dt
+      const res = this.resolveWorld(nx, ny)
 
-          const myCurX = this.predicted.x;
-          const myCurY = this.predicted.y;
-          const meWasInitialized = Math.abs(myCurX) > 1 || Math.abs(myCurY) > 1;
+      const fixed = this.ac.validateMovement(id, prev, res, dt)
+      p.x = fixed.x; p.y = fixed.y
+      this.ac.recordPosition(id, p.x, p.y)
 
-          this.worldPlayers = {};
-          const ids = [this.myPeerId, ...this.peers].filter(
-            (id) => id && !this.ac.bans.has(id),
-          );
+      p.aimX = inp.a[0] || 1
+      p.aimY = inp.a[1] || 0
 
-          for (const id of ids) {
-            const v = this.views[id];
-            const spawn = SPAWNS[ids.indexOf(id) % SPAWNS.length];
-            const useViewPos =
-              v && v.init && (Math.abs(v.tx) > 1 || Math.abs(v.ty) > 1);
+      if (inp.f && time - p.fireAt > CFG.FIRE_CD){
+        if (!this.ac.validateFire(id, time, CFG.FIRE_CD)) continue
+        const len = Math.hypot(p.aimX, p.aimY) || 1
+        const ax = p.aimX/len, ay = p.aimY/len
+        p.fireAt = time
+        const hitId = hostSimulateShot(this.ac, id, { x:p.x, y:p.y }, [ax,ay], this.worldPlayers, this.wallRects)
+        this.hostSpawnBullet(id, p.x, p.y, p.aimX, p.aimY)
+        if (hitId){
+          const t = this.worldPlayers[hitId]
+          t.hp -= CFG.DAMAGE
+          let killed = false
+          if (t.hp <= 0){
+            t.hp = 0
+            t.dead = true
+            t.respawnAt = time + CFG.RESPAWN
+            killed = true
 
-            this.worldPlayers[id] = {
-              x: useViewPos ? v.tx : spawn.x,
-              y: useViewPos ? v.ty : spawn.y,
-              vx: 0,
-              vy: 0,
-              aimX: 1,
-              aimY: 0,
-              hp: v ? v.hp : CFG.MAX_HP,
-              dead: v ? v.dead : false,
-              fireAt: 0,
-              respawnAt: 0,
-              score: 0,
-            };
-
-            if (!this.inputs[id])
-              this.inputs[id] = { m: [0, 0], a: [1, 0], f: 0 };
-          }
-
-          const me = this.worldPlayers[this.myPeerId];
-          if (me) {
-            if (meWasInitialized) {
-              me.x = myCurX;
-              me.y = myCurY;
-            } else {
-              const s = SPAWNS[0];
-              me.x = s.x;
-              me.y = s.y;
-            }
-
-            this.local.x = me.x;
-            this.local.y = me.y;
-            this.predicted.x = me.x;
-            this.predicted.y = me.y;
-
-            const v = this.views[this.myPeerId];
-            if (v) {
-              v.tx = me.x;
-              v.ty = me.y;
-              v.sprite.x = me.x;
-              v.sprite.y = me.y;
-              v.init = true;
-            }
-          }
-
-          for (const peerId of this.peers) {
-            this.sendBan(
-              {
-                full: true,
-                bans: [...this.ac.bans],
-                pbans: [...this.ac.persistentBans],
-              },
-              peerId,
-            );
-          }
-
-          acLog(`👑 хост: ${this.myPeerId.slice(0, 6)}`);
-          this.updateStatus();
-        }
-
-        /* =========== VOTE =========== */
-        onVoteClick() {
-          const hostId = this.currentHostId();
-          if (!hostId || hostId === this.myPeerId) {
-            acLog("✖ ты хост");
-            return;
-          }
-
-          if (this.voteActive && this.voteTarget === hostId) {
-            const already = this.votes.has(this.myPeerId);
-            this.castVote(this.myPeerId, !already);
-            this.sendVote({ kind: "cast", agree: !already });
-            return;
-          }
-
-          this.beginVote(hostId, this.myPeerId);
-          this.sendVote({ kind: "start", target: hostId });
-        }
-
-        beginVote(targetHost, initiator) {
-          if (this.voteActive) return;
-          this.voteActive = true;
-          this.voteTarget = targetHost;
-          this.voteDeadline = performance.now() + VOTE_DURATION_MS;
-          this.votes.clear();
-          if (initiator) this.votes.set(initiator, targetHost);
-          acLog(`🗳 голосование: сменить ${targetHost.slice(0, 6)}`);
-          this.updateVoteUI();
-        }
-
-        castVote(voter, agree) {
-          if (!this.voteActive || !this.voteTarget) return;
-          if (agree) this.votes.set(voter, this.voteTarget);
-          else this.votes.delete(voter);
-          this.checkVoteResult();
-          this.updateVoteUI();
-        }
-
-        checkVoteResult() {
-          if (!this.voteActive) return;
-          const total = 1 + this.peers.size;
-          const yes = this.votes.size;
-          const passed = yes > total / 2;
-          const failed = performance.now() > this.voteDeadline;
-          if (passed) {
-            this.hostBlacklist.add(this.voteTarget);
-            this.sendVote({ kind: "blacklist", id: this.voteTarget });
-            acLog(`✅ ${this.voteTarget.slice(0, 6)} снят (${yes}/${total})`);
-            this.endVote();
-          } else if (failed) {
-            acLog(`✖ провал (${yes}/${total})`);
-            this.endVote();
-          }
-        }
-
-        endVote() {
-          this.voteActive = false;
-          this.voteTarget = null;
-          this.votes.clear();
-          this.voteBtn.classList.remove("armed");
-          this.updateVoteUI();
-        }
-
-        updateVoteUI() {
-          if (!this.voteInfo || !this.voteBtn) return;
-          if (!this.voteActive) {
-            this.voteInfo.textContent = "";
-            this.voteBtn.classList.remove("armed");
-            return;
-          }
-          const total = 1 + this.peers.size;
-          const yes = this.votes.size;
-          this.voteInfo.textContent = `VOTE ${yes}/${total}\nцель: ${(this.voteTarget || "").slice(0, 6)}`;
-          this.voteBtn.classList.toggle("armed", this.votes.has(this.myPeerId));
-        }
-
-        /* =========== STATUS =========== */
-        updateStatus() {
-          if (!this.statusEl) return;
-          const n = this.peers.size + (this.myPeerId ? 1 : 0);
-          const role = this.isHost
-            ? "HOST"
-            : this.hasBecomeClient
-              ? "CLIENT"
-              : "WAIT";
-          const hp = Math.max(0, Math.round(this.local.hp));
-          const pid = (this.identity?.pubHash || "?").slice(0, 8);
-          const sc = this.local.score || 0;
-          this.statusEl.textContent = `${role} · ${this.roomId} · игроков: ${n} · HP: ${hp} · очки: ${sc} · id:${pid}`;
-        }
-
-        renderScores() {
-          if (!this.scoresEl) return;
-          if (!this.scores || Object.keys(this.scores).length === 0) {
-            this.scoresEl.textContent = "";
-            return;
-          }
-
-          const rows = [];
-          for (const id in this.scores) {
-            const score = this.scores[id];
-            const v = this.views[id];
-            const isMe = id === this.myPeerId;
-            const dead = v ? v.dead : false;
-            rows.push({ id, score, isMe, dead });
-          }
-          rows.sort((a, b) => b.score - a.score);
-
-          let html = "🏆 СЧЁТ\n";
-          for (let i = 0; i < rows.length; i++) {
-            const r = rows[i];
-            const medal =
-              i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "  ";
-            const tag = r.isMe ? " (я)" : "";
-            const cls = r.isMe ? "me" : r.dead ? "dead" : "";
-            html += `<span class="${cls}">${medal} ${r.id.slice(0, 6)}${tag} · ${r.score}</span>\n`;
-          }
-          this.scoresEl.innerHTML = html;
-        }
-
-        /* =========== STATE =========== */
-        applyState(data) {
-          if (!data || !data.p) return;
-
-          /* Принимаем таблицу очков */
-          if (data.scores) {
-            this.scores = data.scores;
-            if (this.myPeerId && this.scores[this.myPeerId] !== undefined) {
-              this.local.score = this.scores[this.myPeerId];
-            }
-          }
-
-          for (const id in data.p) {
-            const [x, y, ax, ay, hp, dead] = data.p[id];
-            if (id === this.myPeerId) {
-              this.local.hp = hp;
-              this.local.dead = !!dead;
-              const dx = x - this.predicted.x,
-                dy = y - this.predicted.y;
-              if (Math.abs(dx) > 120 || Math.abs(dy) > 120) {
-                this.predicted.x = x;
-                this.predicted.y = y;
-              } else {
-                this.predicted.x += dx * 0.15;
-                this.predicted.y += dy * 0.15;
-              }
-            } else {
-              let v = this.views[id];
-              if (!v) {
-                v = this.createView(id);
-                v.tx = x;
-                v.ty = y;
-                v.init = true;
-                v.sprite.x = x;
-                v.sprite.y = y;
-              }
-              v.tx = x;
-              v.ty = y;
-              v.ta = Math.atan2(ay, ax);
-              v.hp = hp;
-              v.dead = !!dead;
-            }
-          }
-          for (const id in this.views) {
-            if (id !== this.myPeerId && !(id in data.p)) this.destroyView(id);
-          }
-        }
-
-        spawnGhostBullet(d) {
-          if (this.ghostBullets[d.id]) return;
-          const s = this.add.image(d.x, d.y, "bullet").setDepth(5);
-          this.ghostBullets[d.id] = {
-            sprite: s,
-            vx: d.vx,
-            vy: d.vy,
-            born: this.time.now,
-          };
-        }
-
-        applyHit(d) {
-          if (d.bid && this.ghostBullets[d.bid]) {
-            this.ghostBullets[d.bid].sprite.destroy();
-            delete this.ghostBullets[d.bid];
-          }
-          if (d.target === this.myPeerId) {
-            this.local.hp = d.hp;
-            this.local.dead = !!d.dead;
-            this.cameras.main.flash(90, 120, 0, 0);
-          }
-          const v = this.views[d.target];
-          if (v) {
-            v.hp = d.hp;
-            v.dead = !!d.dead;
-            v.sprite.setTintFill(0xffffff);
-            this.time.delayedCall(60, () => {
-              if (v.sprite && v.sprite.active)
-                v.sprite.setTint(colorFromId(d.target));
-            });
-          }
-          if (d.by === this.myPeerId) this.cameras.main.shake(50, 0.002);
-        }
-
-        /* =========== VIEWS =========== */
-        createView(id) {
-          if (this.views[id]) return this.views[id];
-          const sprite = this.add
-            .image(0, 0, "player")
-            .setDepth(10)
-            .setTint(colorFromId(id));
-          const bar = this.add.graphics().setDepth(11);
-          this.views[id] = {
-            sprite,
-            bar,
-            hp: CFG.MAX_HP,
-            dead: false,
-            tx: 0,
-            ty: 0,
-            ta: 0,
-            init: false,
-          };
-          return this.views[id];
-        }
-        destroyView(id) {
-          const v = this.views[id];
-          if (!v) return;
-          v.sprite.destroy();
-          v.bar.destroy();
-          delete this.views[id];
-        }
-
-        /* =========== UPDATE =========== */
-        update(time, delta) {
-          const dt = Math.min(delta, 50) / 1000;
-
-          if (time - this.lastAcTick > 250) {
-            const dtAc = (time - this.lastAcTick) / 1000;
-            this.lastAcTick = time;
-            this.ac.tick(dtAc);
-          }
-          if (this.voteActive) this.checkVoteResult();
-
-          if (!this.local.dead) {
-            const nx = this.predicted.x + this.moveVec.x * CFG.SPEED * dt;
-            const ny = this.predicted.y + this.moveVec.y * CFG.SPEED * dt;
-            const p = this.resolveWorld(nx, ny);
-            this.predicted.x = p.x;
-            this.predicted.y = p.y;
-          }
-          this.local.x = this.predicted.x;
-          this.local.y = this.predicted.y;
-          this.local.aimX = this.aimVec.x;
-          this.local.aimY = this.aimVec.y;
-
-          if (!this.isHost && time - this.lastInputSent > CFG.INPUT_MS) {
-            this.lastInputSent = time;
-            const hostId = this.currentHostId();
-            if (hostId && hostId !== this.myPeerId) {
-              this.ac.seq++;
-              const payload = {
-                seq: this.ac.seq,
-                m: [this.moveVec.x, this.moveVec.y],
-                a: [this.aimVec.x, this.aimVec.y],
-                f: this.firing ? 1 : 0,
-                d: this.local.dead ? 1 : 0,
-              };
-              payload.sig = this.ac.sign(payload);
-              this.sendInput(payload, hostId);
+            const shooter = this.worldPlayers[id]
+            if (shooter){
+              shooter.score = (shooter.score || 0) + 1
+              DBG.log('SCORE', id.slice(0,8), 'killed', hitId.slice(0,8),
+                      '→ score:', shooter.score)
             }
           }
-
-          if (this.isHost) {
-            this.inputs[this.myPeerId] = {
-              m: [this.moveVec.x, this.moveVec.y],
-              a: [this.aimVec.x, this.aimVec.y],
-              f: this.firing ? 1 : 0,
-              d: this.local.dead ? 1 : 0,
-              _t: time,
-            };
-            this.simulateHost(time, dt);
-          }
-
-          this.updateGhostBullets(time, dt);
-          this.renderPlayers(time, dt);
-          if (time % 200 < 20) {
-            this.updateStatus();
-            this.updateVoteUI();
-            this.renderScores();
-          }
+          const hd = { bid:null, target:hitId, by:id, hp:t.hp, dead:t.dead, killed }
+          this.sendHit(hd)
+          this.applyHit(hd)
         }
+      }
+    }
 
-        resolveWorld(x, y) {
-          x = clamp(x, CFG.PLAYER_R, CFG.W - CFG.PLAYER_R);
-          y = clamp(y, CFG.PLAYER_R, CFG.H - CFG.PLAYER_R);
-          for (const r of this.wallRects) {
-            const res = resolveCircleRect(x, y, CFG.PLAYER_R, r);
-            if (res) {
-              x = res.x;
-              y = res.y;
-            }
+    for (let i = this.bullets.length-1; i >= 0; i--){
+      const b = this.bullets[i]
+      b.x += b.vx*dt; b.y += b.vy*dt
+      if (time - b.born > CFG.BULLET_LIFE*1000){ this.bullets.splice(i,1); continue }
+      let dead = false
+      for (const r of this.wallRects){
+        if (b.x > r.x-CFG.BULLET_R && b.x < r.x+r.w+CFG.BULLET_R &&
+            b.y > r.y-CFG.BULLET_R && b.y < r.y+r.h+CFG.BULLET_R){ dead = true; break }
+      }
+      if (dead) this.bullets.splice(i,1)
+    }
+
+    if (time - this.lastStateSent > CFG.STATE_MS){
+      this.lastStateSent = time
+
+      if (time - this._lastVisibleCalc > 150){
+        this._lastVisibleCalc = time
+        this._visibleCache = {}
+        for (const pid of [this.myPeerId, ...this.peers]){
+          const viewer = this.worldPlayers[pid]
+          if (viewer){
+            this._visibleCache[pid] = this.ac.computeVisible(
+              pid, this.worldPlayers, this.wallRects, viewer
+            )
           }
-          return { x, y };
-        }
-
-        /* =========== HOST SIM =========== */
-        simulateHost(time, dt) {
-          for (const id in this.worldPlayers) {
-            const p = this.worldPlayers[id];
-            let inp = this.inputs[id] || { m: [0, 0], a: [1, 0], f: 0 };
-
-            /* Decay: если давно не слышно — стоп */
-            const lastInputAge = time - (inp._t || 0);
-            if (lastInputAge > 500 && id !== this.myPeerId) {
-              inp = { m: [0, 0], a: inp.a || [1, 0], f: 0 };
-            }
-
-            if (p.dead) {
-              if (time > p.respawnAt) {
-                const sp = SPAWNS[Math.floor(Math.random() * SPAWNS.length)];
-                p.x = sp.x;
-                p.y = sp.y;
-                p.hp = CFG.MAX_HP;
-                p.dead = false;
-                p.vx = 0;
-                p.vy = 0;
-              } else continue;
-            }
-
-            const prev = { x: p.x, y: p.y };
-            p.vx = (inp.m[0] || 0) * CFG.SPEED;
-            p.vy = (inp.m[1] || 0) * CFG.SPEED;
-            const nx = p.x + p.vx * dt,
-              ny = p.y + p.vy * dt;
-            const res = this.resolveWorld(nx, ny);
-
-            const fixed = this.ac.validateMovement(id, prev, res, dt);
-            p.x = fixed.x;
-            p.y = fixed.y;
-            this.ac.recordPosition(id, p.x, p.y);
-
-            p.aimX = inp.a[0] || 1;
-            p.aimY = inp.a[1] || 0;
-
-            if (inp.f && time - p.fireAt > CFG.FIRE_CD) {
-              if (!this.ac.validateFire(id, time, CFG.FIRE_CD)) continue;
-              const len = Math.hypot(p.aimX, p.aimY) || 1;
-              const ax = p.aimX / len,
-                ay = p.aimY / len;
-              // const sx = p.x + ax * (CFG.PLAYER_R + 6);
-              // const sy = p.y + ay * (CFG.PLAYER_R + 6);
-              // if (
-              //   !this.ac.validateBulletOrigin(
-              //     sx,
-              //     sy,
-              //     this.wallRects,
-              //     CFG.BULLET_R,
-              //   )
-              // ) {
-              //   this.ac.strike(id, "bullet in wall", 1);
-              //   continue;
-              // }
-              p.fireAt = time;
-              const hitId = hostSimulateShot(
-                this.ac,
-                id,
-                { x: p.x, y: p.y },
-                [ax, ay],
-                this.worldPlayers,
-                this.wallRects,
-              );
-              this.hostSpawnBullet(id, p.x, p.y, p.aimX, p.aimY);
-              if (hitId) {
-                const t = this.worldPlayers[hitId];
-                t.hp -= CFG.DAMAGE;
-                let killed = false;
-                if (t.hp <= 0) {
-                  t.hp = 0;
-                  t.dead = true;
-                  t.respawnAt = time + CFG.RESPAWN;
-                  killed = true;
-
-                  /* ⚡ УБИЙСТВО — +1 очко стрелку */
-                  const shooter = this.worldPlayers[id];
-                  if (shooter) {
-                    shooter.score = (shooter.score || 0) + 1;
-                    DBG.log(
-                      "SCORE",
-                      id.slice(0, 8),
-                      "killed",
-                      hitId.slice(0, 8),
-                      "→ score:",
-                      shooter.score,
-                    );
-                  }
-                }
-                const hd = {
-                  bid: null,
-                  target: hitId,
-                  by: id,
-                  hp: t.hp,
-                  dead: t.dead,
-                  killed,
-                };
-                this.sendHit(hd);
-                this.applyHit(hd);
-              }
-            }
-          }
-
-          for (let i = this.bullets.length - 1; i >= 0; i--) {
-            const b = this.bullets[i];
-            b.x += b.vx * dt;
-            b.y += b.vy * dt;
-            if (time - b.born > CFG.BULLET_LIFE * 1000) {
-              this.bullets.splice(i, 1);
-              continue;
-            }
-            let dead = false;
-            for (const r of this.wallRects) {
-              if (
-                b.x > r.x - CFG.BULLET_R &&
-                b.x < r.x + r.w + CFG.BULLET_R &&
-                b.y > r.y - CFG.BULLET_R &&
-                b.y < r.y + r.h + CFG.BULLET_R
-              ) {
-                dead = true;
-                break;
-              }
-            }
-            if (dead) this.bullets.splice(i, 1);
-          }
-
-          if (time - this.lastStateSent > CFG.STATE_MS) {
-            this.lastStateSent = time;
-
-            if (time - this._lastVisibleCalc > 150) {
-              this._lastVisibleCalc = time;
-              this._visibleCache = {};
-              for (const pid of [this.myPeerId, ...this.peers]) {
-                const viewer = this.worldPlayers[pid];
-                if (viewer) {
-                  this._visibleCache[pid] = this.ac.computeVisible(
-                    pid,
-                    this.worldPlayers,
-                    this.wallRects,
-                    viewer,
-                  );
-                }
-              }
-            }
-
-            /* Таблица очков — общая для всех */
-            const scores = {};
-            for (const id in this.worldPlayers) {
-              scores[id] = Math.round(this.worldPlayers[id].score || 0);
-            }
-
-            for (const peerId of [this.myPeerId, ...this.peers]) {
-              if (this.ac.bans.has(peerId)) continue;
-              const visible = this._visibleCache[peerId];
-              if (!visible) continue;
-              const pack = {};
-              for (const id of visible) {
-                const w = this.worldPlayers[id];
-                if (!w) continue;
-                pack[id] = [
-                  Math.round(w.x * 10) / 10,
-                  Math.round(w.y * 10) / 10,
-                  Math.round(w.aimX * 100) / 100,
-                  Math.round(w.aimY * 100) / 100,
-                  Math.round(w.hp),
-                  w.dead ? 1 : 0,
-                ];
-              }
-              const payload = { p: pack, scores };
-              if (peerId === this.myPeerId) this.applyState(payload);
-              else this.sendState(payload, peerId);
-            }
-          }
-
-          if (time - this._lastPing > 2000) {
-            this._lastPing = time;
-            for (const peerId of this.peers) {
-              this.sendPing({ t: performance.now(), pong: 0 }, peerId);
-            }
-          }
-        }
-
-        hostSpawnBullet(ownerId, x, y, ax, ay) {
-          const len = Math.hypot(ax, ay) || 1;
-          const id = this.myPeerId + "-" + ++this.bulletSeq;
-          const b = {
-            id,
-            x: x + (ax / len) * (CFG.PLAYER_R + 6),
-            y: y + (ay / len) * (CFG.PLAYER_R + 6),
-            vx: (ax / len) * CFG.BULLET_SPEED,
-            vy: (ay / len) * CFG.BULLET_SPEED,
-            owner: ownerId,
-            born: this.time.now,
-          };
-          this.bullets.push(b);
-          const payload = {
-            id: b.id,
-            x: b.x,
-            y: b.y,
-            vx: b.vx,
-            vy: b.vy,
-            owner: ownerId,
-          };
-          this.sendBullet(payload);
-          this.spawnGhostBullet(payload);
-        }
-
-        updateGhostBullets(time, dt) {
-          for (const id in this.ghostBullets) {
-            const g = this.ghostBullets[id];
-            g.sprite.x += g.vx * dt;
-            g.sprite.y += g.vy * dt;
-            let kill = time - g.born > CFG.BULLET_LIFE * 1000;
-            if (!kill) {
-              for (const r of this.wallRects) {
-                if (
-                  g.sprite.x > r.x - CFG.BULLET_R &&
-                  g.sprite.x < r.x + r.w + CFG.BULLET_R &&
-                  g.sprite.y > r.y - CFG.BULLET_R &&
-                  g.sprite.y < r.y + r.h + CFG.BULLET_R
-                ) {
-                  kill = true;
-                  break;
-                }
-              }
-            }
-            if (kill) {
-              g.sprite.destroy();
-              delete this.ghostBullets[id];
-            }
-          }
-        }
-
-        renderPlayers(time, dt) {
-          const k = Math.min(1, dt * 14);
-          for (const id in this.views) {
-            const v = this.views[id];
-            if (id === this.myPeerId) {
-              v.tx = this.local.x;
-              v.ty = this.local.y;
-              v.ta = Math.atan2(this.local.aimY, this.local.aimX);
-              v.hp = this.local.hp;
-              v.dead = this.local.dead;
-            }
-            if (!v.init) {
-              v.init = true;
-              v.sprite.x = v.tx;
-              v.sprite.y = v.ty;
-            } else {
-              v.sprite.x += (v.tx - v.sprite.x) * k;
-              v.sprite.y += (v.ty - v.sprite.y) * k;
-            }
-            v.sprite.rotation = v.ta;
-            const vis = !v.dead;
-            v.sprite.setVisible(vis);
-            v.bar.setVisible(vis);
-            if (vis) {
-              const bx = v.sprite.x - 20,
-                by = v.sprite.y - 34;
-              const w = 40 * (v.hp / CFG.MAX_HP);
-              v.bar.clear();
-              v.bar.fillStyle(0x000000, 0.6);
-              v.bar.fillRect(bx - 1, by - 1, 42, 7);
-              v.bar.fillStyle(
-                v.hp > 50 ? 0x3fb950 : v.hp > 25 ? 0xd29922 : 0xf85149,
-                1,
-              );
-              v.bar.fillRect(bx, by, w, 5);
-            }
-          }
-          const me = this.views[this.myPeerId];
-          if (me) this.cameras.main.centerOn(me.sprite.x, me.sprite.y);
-        }
-
-        /* =========== BAN =========== */
-        onAntiCheatBan(id, reason, persistent) {
-          if (reason === "timeout" || reason === "idle") return;
-          if (this.ac.bans.has(id) && !persistent) return;
-          this.ac.bans.add(id);
-          this.destroyView(id);
-          delete this.inputs[id];
-          delete this.worldPlayers[id];
-          this.peers.delete(id);
-          if (this.isHost) {
-            const p = this.ac.peers.get(id);
-            for (const peerId of this.peers) {
-              this.sendBan(
-                {
-                  id,
-                  reason,
-                  pubHash: persistent ? p?.pubHash || null : null,
-                },
-                peerId,
-              );
-            }
-          }
-          this.updateStatus();
         }
       }
 
-      /* ============================================================
+      const scores = {}
+      for (const id in this.worldPlayers){
+        scores[id] = Math.round(this.worldPlayers[id].score || 0)
+      }
+
+      for (const peerId of [this.myPeerId, ...this.peers]){
+        if (this.ac.bans.has(peerId)) continue
+        const visible = this._visibleCache[peerId]
+        if (!visible) continue
+        const pack = {}
+        for (const id of visible){
+          const w = this.worldPlayers[id]
+          if (!w) continue
+          pack[id] = [
+            Math.round(w.x*10)/10, Math.round(w.y*10)/10,
+            Math.round(w.aimX*100)/100, Math.round(w.aimY*100)/100,
+            Math.round(w.hp), w.dead ? 1 : 0,
+          ]
+        }
+        const payload = { p: pack, scores }
+        if (peerId === this.myPeerId) this.applyState(payload)
+        else this.sendState(payload, peerId)
+      }
+    }
+
+    if (time - this._lastPing > 2000){
+      this._lastPing = time
+      for (const peerId of this.peers){
+        this.sendPing({ t: performance.now(), pong:0 }, peerId)
+      }
+    }
+  }
+
+  hostSpawnBullet(ownerId, x, y, ax, ay){
+    const len = Math.hypot(ax, ay) || 1
+    const id = this.myPeerId + '-' + (++this.bulletSeq)
+    const b = {
+      id,
+      x: x + (ax/len)*(CFG.PLAYER_R+6),
+      y: y + (ay/len)*(CFG.PLAYER_R+6),
+      vx: (ax/len)*CFG.BULLET_SPEED,
+      vy: (ay/len)*CFG.BULLET_SPEED,
+      owner: ownerId, born: this.time.now,
+    }
+    this.bullets.push(b)
+    const payload = { id:b.id, x:b.x, y:b.y, vx:b.vx, vy:b.vy, owner:ownerId }
+    this.sendBullet(payload)
+    this.spawnGhostBullet(payload)
+  }
+
+  updateGhostBullets(time, dt){
+    for (const id in this.ghostBullets){
+      const g = this.ghostBullets[id]
+      g.sprite.x += g.vx*dt
+      g.sprite.y += g.vy*dt
+      let kill = time - g.born > CFG.BULLET_LIFE*1000
+      if (!kill){
+        for (const r of this.wallRects){
+          if (g.sprite.x > r.x-CFG.BULLET_R && g.sprite.x < r.x+r.w+CFG.BULLET_R &&
+              g.sprite.y > r.y-CFG.BULLET_R && g.sprite.y < r.y+r.h+CFG.BULLET_R){ kill = true; break }
+        }
+      }
+      if (kill){ g.sprite.destroy(); delete this.ghostBullets[id] }
+    }
+  }
+
+  renderPlayers(time, dt){
+    const k = Math.min(1, dt*14)
+    for (const id in this.views){
+      const v = this.views[id]
+
+      /* Свой игрок — мгновенно */
+      if (id === this.myPeerId){
+        v.tx = this.local.x; v.ty = this.local.y
+        v.ta = Math.atan2(this.local.aimY, this.local.aimX)
+        v.hp = this.local.hp
+        v.dead = this.local.dead
+        if (!v.init){ v.init = true; v.sprite.x = v.tx; v.sprite.y = v.ty }
+        else { v.sprite.x = v.tx; v.sprite.y = v.ty }
+      } else if (v.buffer && v.buffer.length >= 2){
+        /* Чужие — интерполяция с задержкой 100мс */
+        const renderTime = performance.now() - 100
+        let a = v.buffer[0], b = v.buffer[v.buffer.length-1]
+        for (let i = 0; i < v.buffer.length - 1; i++){
+          if (v.buffer[i].t <= renderTime && v.buffer[i+1].t > renderTime){
+            a = v.buffer[i]; b = v.buffer[i+1]; break
+          }
+        }
+        const span = Math.max(1, b.t - a.t)
+        const alpha = Math.min(1, Math.max(0, (renderTime - a.t) / span))
+        v.sprite.x = a.x + (b.x - a.x) * alpha
+        v.sprite.y = a.y + (b.y - a.y) * alpha
+        v.ta = Math.atan2(b.ay, b.ax)
+        v.hp = b.hp
+        v.dead = b.dead
+        v.init = true
+      } else {
+        /* Fallback */
+        if (!v.init){ v.init = true; v.sprite.x = v.tx; v.sprite.y = v.ty }
+        else {
+          v.sprite.x += (v.tx - v.sprite.x) * k
+          v.sprite.y += (v.ty - v.sprite.y) * k
+        }
+      }
+
+      v.sprite.rotation = v.ta
+      const vis = !v.dead
+      v.sprite.setVisible(vis); v.bar.setVisible(vis)
+      if (vis){
+        const bx = v.sprite.x - 20, by = v.sprite.y - 34
+        const w = 40 * (v.hp / CFG.MAX_HP)
+        v.bar.clear()
+        v.bar.fillStyle(0x000000, 0.6); v.bar.fillRect(bx-1, by-1, 42, 7)
+        v.bar.fillStyle(v.hp>50?0x3fb950:v.hp>25?0xd29922:0xf85149, 1)
+        v.bar.fillRect(bx, by, w, 5)
+      }
+    }
+    const me = this.views[this.myPeerId]
+    if (me) this.cameras.main.centerOn(me.sprite.x, me.sprite.y)
+  }
+
+  /* =========== BAN =========== */
+  onAntiCheatBan(id, reason, persistent){
+    if (reason === 'timeout' || reason === 'idle') return
+    if (this.ac.bans.has(id) && !persistent) return
+    this.ac.bans.add(id)
+    this.destroyView(id)
+    delete this.inputs[id]
+    delete this.worldPlayers[id]
+    this.peers.delete(id)
+    if (this.isHost){
+      const p = this.ac.peers.get(id)
+      for (const peerId of this.peers){
+        this.sendBan({
+          id, reason,
+          pubHash: persistent ? (p?.pubHash || null) : null,
+        }, peerId)
+      }
+    }
+    this.updateStatus()
+  }
+}
+
+/* ============================================================
    10. СТАРТ
    ============================================================ */
-      (async () => {
-        DBG.log("BOOT", "starting...");
-        const identity = new Identity();
-        await identity.init();
-        document.getElementById("pid").textContent =
-          `identity: ${identity.mode} · id: ${identity.pubHash}`;
-        DBG.log("BOOT", "identity ready:", identity.mode);
+;(async ()=>{
+  DBG.log('BOOT', 'starting...')
+  const identity = new Identity()
+  await identity.init()
+  document.getElementById('pid').textContent =
+    `identity: ${identity.mode} · id: ${identity.pubHash}`
+  DBG.log('BOOT', 'identity ready:', identity.mode)
 
-        document.getElementById("playBtn").addEventListener("click", () => {
-          const code = (
-            document.getElementById("roomInput").value || "arena1"
-          ).trim();
-          DBG.log("BOOT", "starting with room:", JSON.stringify(code));
-          document.getElementById("menu").style.display = "none";
+  document.getElementById('playBtn').addEventListener('click', ()=>{
+    const code = (document.getElementById('roomInput').value || 'arena1').trim()
+    DBG.log('BOOT', 'starting with room:', JSON.stringify(code))
+    document.getElementById('menu').style.display = 'none'
 
-          new Phaser.Game({
-            type: Phaser.AUTO,
-            parent: "game",
-            backgroundColor: "#0b0e13",
-            scale: {
-              mode: Phaser.Scale.RESIZE,
-              autoCenter: Phaser.Scale.CENTER_BOTH,
-            },
-            render: { antialias: false, pixelArt: false, roundPixels: true },
-            fps: { target: 45, min: 25 },
-            scene: [BootScene, GameScene],
-            callbacks: {
-              preBoot: (game) => {
-                game.registry.set("roomId", code);
-                game.registry.set("identity", identity);
-              },
-            },
-          });
-        });
-      })();
-    </script>
-  </body>
+    new Phaser.Game({
+      type: Phaser.AUTO,
+      parent: 'game',
+      backgroundColor: '#0b0e13',
+      scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+      render: { antialias:false, pixelArt:false, roundPixels:true },
+      fps: { target:45, min:25 },
+      scene: [BootScene, GameScene],
+      callbacks: {
+        preBoot: (game)=>{
+          game.registry.set('roomId', code)
+          game.registry.set('identity', identity)
+        }
+      },
+    })
+  })
+})()
+</script>
+</body>
 </html>
