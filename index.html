@@ -783,7 +783,6 @@ class GameScene extends Phaser.Scene {
 
       /* ---- WELCOME ---- */
       if (type === 'welcome'){
-        this.myPeerId = msg.peerId
         this.serverHostId = msg.host
         DBG.log('NET', '*** WELCOMED ***', msg.peerId, 'host:', msg.host, 'peers:', msg.peers)
         DBG.banner('YOU ARE: ' + msg.peerId, '#2f81f7')
