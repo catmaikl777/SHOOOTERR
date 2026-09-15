@@ -1,106 +1,372 @@
+// ============================================================
+// server.js — WebSocket relay + Maximum AntiCheat
+// ============================================================
 const { WebSocketServer } = require('ws');
+const fs = require('fs');
 
 const port = process.env.PORT || 3000;
-const wss = new WebSocketServer({ port }, () => {
-  console.log(`[Server] WebSocket relay started on port ${port}`);
-});
+const wss = new WebSocketServer({ port, maxPayload: 2048 });
 
-const rooms = new Map();      // roomId -> Set<WebSocket>
-const roomHost = new Map();   // roomId -> peerId
+// ============================================================
+// КОНФИГ АНТИЧИТА
+// ============================================================
+const AC = {
+  MAX_PACKET_BYTES:        1024,
+  MAX_MSG_PER_SEC:         60,       // от одного клиента
+  MAX_ROOMS:               200,
+  MAX_CLIENTS_PER_ROOM:    12,
+  MAX_SEQ_GAP:             500,
+  STRIKE_DECAY_MS:         60000,
+  STRIKE_KICK:             8,
+  STRIKE_SEVERE:           3,
+  IDENTITY_TIMEOUT_MS:     20000,
+  JOIN_RATE_LIMIT_MS:      2000,
+  BAN_FILE:                './bans.json',
+  IP_BAN_MS:               60 * 60 * 1000,   // 1 час
+  MAX_BANS_PER_IP:         3,
+};
 
-wss.on('connection', (ws) => {
-  let roomId = null;
-  let peerId = null;
+// ============================================================
+// ХРАНИЛИЩЕ
+// ============================================================
+const rooms         = new Map();   // roomId -> Set<ws>
+const roomHost      = new Map();   // roomId -> peerId
+const clients       = new Map();   // peerId -> clientState
+const bannedHashes  = new Set();   // pubHash
+const ipStrikes     = new Map();   // ip -> { count, until }
+const ipBanList     = new Map();   // ip -> banUntil
 
-  ws.on('message', (rawData) => {
-    try {
-      const msg = JSON.parse(rawData);
+// ============================================================
+// УТИЛИТЫ
+// ============================================================
+function safeParse(raw){
+  if (!raw) return null;
+  const str = raw.toString();
+  if (str.length > AC.MAX_PACKET_BYTES) return null;
+  try { return JSON.parse(str); } catch { return null; }
+}
 
-      if (msg.type === 'join') {
-        roomId = msg.room;
-        if (!rooms.has(roomId)) rooms.set(roomId, new Set());
-        const room = rooms.get(roomId);
+function validateVec(v){
+  return Array.isArray(v) && v.length === 2 &&
+    Number.isFinite(v[0]) && Number.isFinite(v[1]) &&
+    Math.abs(v[0]) <= 1.5 && Math.abs(v[1]) <= 1.5;
+}
 
-        peerId = 'peer_' + Math.random().toString(36).slice(2, 10);
-        ws.peerId = peerId;
-        room.add(ws);
+function validateInputPayload(d){
+  if (!d || typeof d !== 'object') return false;
+  if (!validateVec(d.m)) return false;
+  if (!validateVec(d.a)) return false;
+  if (d.f !== 0 && d.f !== 1) return false;
+  if (typeof d.seq !== 'number' || !Number.isFinite(d.seq)) return false;
+  if (d.seq < 0 || d.seq > 1e9) return false;
+  return true;
+}
 
-        // Первый вошедший становится хостом
-        if (!roomHost.has(roomId)) roomHost.set(roomId, peerId);
+function loadBans(){
+  try {
+    if (fs.existsSync(AC.BAN_FILE)){
+      const arr = JSON.parse(fs.readFileSync(AC.BAN_FILE, 'utf8'));
+      if (Array.isArray(arr)) for (const h of arr) bannedHashes.add(h);
+      console.log(`[AC] loaded ${bannedHashes.size} persistent bans`);
+    }
+  } catch (e) { console.warn('[AC] loadBans err', e.message); }
+}
+function saveBans(){
+  try { fs.writeFileSync(AC.BAN_FILE, JSON.stringify([...bannedHashes])); }
+  catch (e) { console.warn('[AC] saveBans err', e.message); }
+}
+loadBans();
 
-        const existingPeers = [...room]
-          .map((p) => p.peerId)
-          .filter((id) => id && id !== peerId);
+// ============================================================
+// СОСТОЯНИЕ КЛИЕНТА
+// ============================================================
+function ensureClient(ws, ip){
+  let c = clients.get(ws.peerId);
+  if (!c){
+    c = {
+      peerId: ws.peerId,
+      ws,
+      ip,
+      strikes: 0,
+      lastStrike: 0,
+      msgTimes: [],
+      seq: -1,
+      pubHash: null,
+      verified: false,
+      joinedAt: Date.now(),
+      room: null,
+      bytes: 0,
+    };
+    clients.set(ws.peerId, c);
+  }
+  return c;
+}
 
-        ws.send(JSON.stringify({
-          type: 'welcome',
-          peerId,
-          peers: existingPeers,
-          host: roomHost.get(roomId),   // ← хост, назначенный сервером
-        }));
+function decay(c){
+  const now = Date.now();
+  if (c.strikes > 0 && now - c.lastStrike > AC.STRIKE_DECAY_MS){
+    c.strikes--;
+    c.lastStrike = now;
+  }
+}
 
-        for (const peer of room) {
-          if (peer !== ws && peer.readyState === 1) {
-            peer.send(JSON.stringify({ type: 'peer-join', peerId }));
-          }
-        }
+function strike(c, reason, w = 1){
+  c.strikes += w;
+  c.lastStrike = Date.now();
+  const ip = c.ip;
+  const s = ipStrikes.get(ip) || { count: 0, until: 0 };
+  s.count++;
+  s.until = Date.now() + 5 * 60 * 1000;
+  ipStrikes.set(ip, s);
 
-        console.log(`[Room ${roomId}] + ${peerId}, total: ${room.size}, host: ${roomHost.get(roomId)}`);
+  console.warn(`[AC] strike ${c.peerId?.slice(0,8)} ip=${ip} "${reason}" (+${w}) = ${c.strikes}`);
+
+  if (c.strikes >= AC.STRIKE_KICK){
+    banClient(c, `strikes: ${reason}`);
+    return false;
+  }
+  if (s.count >= AC.MAX_BANS_PER_IP){
+    ipBanList.set(ip, Date.now() + AC.IP_BAN_MS);
+    console.warn(`[AC] IP BAN ${ip} (too many strikes)`);
+  }
+  return true;
+}
+
+function banClient(c, reason){
+  if (c.pubHash) bannedHashes.add(c.pubHash);
+  saveBans();
+  console.warn(`[AC] BAN peer=${c.peerId?.slice(0,8)} hash=${c.pubHash?.slice(0,8)} reason="${reason}"`);
+  try { c.ws.send(JSON.stringify({ type: 'banned', reason })); } catch {}
+  try { c.ws.close(1008, 'banned'); } catch {}
+}
+
+function checkRate(c){
+  const now = Date.now();
+  c.msgTimes.push(now);
+  while (c.msgTimes.length && now - c.msgTimes[0] > 1000) c.msgTimes.shift();
+  if (c.msgTimes.length > AC.MAX_MSG_PER_SEC){
+    return strike(c, `rate ${c.msgTimes.length}/s`, AC.STRIKE_SEVERE);
+  }
+  return true;
+}
+
+// ============================================================
+// ГЛАВНЫЙ ОБРАБОТЧИК
+// ============================================================
+wss.on('connection', (ws, req) => {
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+
+  // IP-бан
+  const banUntil = ipBanList.get(ip);
+  if (banUntil && banUntil > Date.now()){
+    console.log(`[AC] rejected ${ip} (IP banned)`);
+    try { ws.close(1008, 'ip banned'); } catch {}
+    return;
+  }
+
+  ws.peerId = 'peer_' + Math.random().toString(36).slice(2, 10);
+  ws.isAlive = true;
+  const c = ensureClient(ws, ip);
+
+  console.log(`[S] + ${c.peerId.slice(0,8)} from ${ip}`);
+
+  ws.on('message', raw => {
+    c.bytes += raw.length || 0;
+
+    const msg = safeParse(raw);
+    if (!msg){
+      strike(c, 'bad packet', AC.STRIKE_SEVERE);
+      return;
+    }
+    if (!checkRate(c)) return;
+    decay(c);
+
+    // ---- JOIN ----
+    if (msg.type === 'join'){
+      if (c.room){ strike(c, 'double join'); return; }
+      const roomId = String(msg.room || '').slice(0, 32);
+      if (!roomId){ strike(c, 'no room'); return; }
+      if (rooms.size > AC.MAX_ROOMS && !rooms.has(roomId)){
+        strike(c, 'too many rooms', AC.STRIKE_SEVERE); return;
+      }
+
+      if (!rooms.has(roomId)) rooms.set(roomId, new Set());
+      const room = rooms.get(roomId);
+
+      if (room.size >= AC.MAX_CLIENTS_PER_ROOM){
+        try { ws.send(JSON.stringify({ type: 'error', msg: 'room full' })); } catch {}
+        try { ws.close(1008, 'room full'); } catch {}
         return;
       }
 
-      const room = rooms.get(roomId);
-      if (!room) return;
+      c.room = roomId;
+      ws.roomId = roomId;
+      room.add(ws);
 
-      if (msg.to) {
-        const target = [...room].find((p) => p.peerId === msg.to);
-        if (target && target.readyState === 1) {
-          target.send(JSON.stringify({ ...msg.data, from: ws.peerId }));
-        }
-      } else {
-        for (const peer of room) {
-          if (peer !== ws && peer.readyState === 1) {
-            peer.send(JSON.stringify({ ...msg.data, from: ws.peerId }));
-          }
+      if (!roomHost.has(roomId)) roomHost.set(roomId, c.peerId);
+
+      const existingPeers = [...room].map(p => p.peerId).filter(id => id && id !== c.peerId);
+
+      try {
+        ws.send(JSON.stringify({
+          type: 'welcome',
+          peerId: c.peerId,
+          peers: existingPeers,
+          host: roomHost.get(roomId),
+        }));
+      } catch {}
+
+      for (const peer of room){
+        if (peer !== ws && peer.readyState === 1){
+          try { peer.send(JSON.stringify({ type: 'peer-join', peerId: c.peerId })); } catch {}
         }
       }
-    } catch (err) {
-      console.error('[Server] error:', err);
+
+      console.log(`[Room ${roomId}] + ${c.peerId.slice(0,8)} total=${room.size} host=${roomHost.get(roomId)?.slice(0,8)}`);
+      return;
+    }
+
+    // Всё остальное — только после join
+    if (!c.room){
+      strike(c, 'msg before join', AC.STRIKE_SEVERE);
+      return;
+    }
+
+    // ---- IDENTITY (публичный хеш) ----
+    if (msg.a === 'id' && msg.d && msg.d.pubHash){
+      const hash = String(msg.d.pubHash).slice(0, 64);
+      if (bannedHashes.has(hash)){
+        banClient(c, 'persistent ban');
+        return;
+      }
+      c.pubHash = hash;
+    }
+
+    // ---- INPUT от клиента (in) ----
+    if (msg.a === 'in' && msg.d){
+      const d = msg.d;
+      if (!validateInputPayload(d)){
+        strike(c, 'bad input', AC.STRIKE_SEVERE);
+        return;
+      }
+      if (d.seq <= c.seq){
+        strike(c, `replay seq ${d.seq}<=${c.seq}`, AC.STRIKE_SEVERE);
+        return;
+      }
+      if (c.seq >= 0 && d.seq - c.seq > AC.MAX_SEQ_GAP){
+        strike(c, `seq gap ${d.seq - c.seq}`);
+        return;
+      }
+      c.seq = d.seq;
+
+      // Нормализуем векторы
+      const lenM = Math.hypot(d.m[0], d.m[1]);
+      if (lenM > 1.05){ d.m[0] /= lenM; d.m[1] /= lenM; }
+      const lenA = Math.hypot(d.a[0], d.a[1]);
+      if (lenA > 1.05){ d.a[0] /= lenA; d.a[1] /= lenA; }
+    }
+
+    // ---- STATE и BULLET и HIT — только от хоста ----
+    if (msg.a === 'st' || msg.a === 'bl' || msg.a === 'hit'){
+      const hostId = roomHost.get(c.room);
+      if (hostId !== c.peerId){
+        strike(c, `${msg.a} from non-host`, AC.STRIKE_SEVERE);
+        return;
+      }
+    }
+
+    // ---- BAN от хоста — реплицируем и проверяем ----
+    if (msg.a === 'ban'){
+      const hostId = roomHost.get(c.room);
+      if (hostId !== c.peerId){
+        strike(c, 'ban from non-host', AC.STRIKE_SEVERE);
+        return;
+      }
+      const target = msg.d && msg.d.id;
+      if (target && target !== c.peerId){
+        const tc = clients.get(target);
+        if (tc){
+          if (msg.d.pubHash) bannedHashes.add(msg.d.pubHash);
+          saveBans();
+          try { tc.ws.send(JSON.stringify({ type: 'banned', reason: msg.d.reason || 'banned by host' })); } catch {}
+          try { tc.ws.close(1008, 'banned'); } catch {}
+        }
+      }
+      // продолжаем релей, чтобы клиенты получили ban-нотификацию
+    }
+
+    // ---- РЕЛЕЙ ----
+    const room = rooms.get(c.room);
+    if (!room) return;
+
+    if (msg.to){
+      const target = [...room].find(p => p.peerId === msg.to);
+      if (target && target.readyState === 1){
+        try { target.send(JSON.stringify({ ...msg.data, from: c.peerId })); } catch {}
+      }
+    } else if (msg.data){
+      for (const peer of room){
+        if (peer !== ws && peer.readyState === 1){
+          try { peer.send(JSON.stringify({ ...msg.data, from: c.peerId })); } catch {}
+        }
+      }
     }
   });
 
   ws.on('close', () => {
-    if (!roomId || !peerId) return;
+    const roomId = c.room;
+    if (!roomId){ clients.delete(c.peerId); return; }
     const room = rooms.get(roomId);
-    if (!room) return;
+    if (!room){ clients.delete(c.peerId); return; }
     room.delete(ws);
 
-    for (const peer of room) {
-      if (peer.readyState === 1) {
-        peer.send(JSON.stringify({ type: 'peer-leave', peerId }));
+    for (const peer of room){
+      if (peer.readyState === 1){
+        try { peer.send(JSON.stringify({ type: 'peer-leave', peerId: c.peerId })); } catch {}
       }
     }
 
-    // Если ушёл хост — назначаем нового
-    if (roomHost.get(roomId) === peerId) {
+    if (roomHost.get(roomId) === c.peerId){
       const remaining = [...room];
-      if (remaining.length > 0) {
-        const newHostId = remaining[0].peerId;
-        roomHost.set(roomId, newHostId);
-        for (const p of remaining) {
-          if (p.readyState === 1) {
-            p.send(JSON.stringify({ type: 'host-change', host: newHostId }));
+      if (remaining.length > 0){
+        const newHost = remaining[0].peerId;
+        roomHost.set(roomId, newHost);
+        for (const p of remaining){
+          if (p.readyState === 1){
+            try { p.send(JSON.stringify({ type: 'host-change', host: newHost })); } catch {}
           }
         }
-        console.log(`[Room ${roomId}] host migrated: ${peerId} → ${newHostId}`);
+        console.log(`[Room ${roomId}] host → ${newHost.slice(0,8)}`);
       } else {
         roomHost.delete(roomId);
       }
     }
 
-    console.log(`[Room ${roomId}] - ${peerId}, remaining: ${room.size}`);
     if (room.size === 0) rooms.delete(roomId);
+    clients.delete(c.peerId);
+    console.log(`[S] - ${c.peerId.slice(0,8)}`);
   });
 
-  ws.on('error', (err) => console.error(`[Client ${peerId}] error:`, err));
+  ws.on('error', err => console.error(`[S] err ${c.peerId?.slice(0,8)}:`, err.message));
+  ws.on('pong', () => { ws.isAlive = true; });
 });
+
+// ============================================================
+// HEARTBEAT
+// ============================================================
+setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (ws.isAlive === false){ try { ws.terminate(); } catch {} return; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch {}
+  });
+}, 30000);
+
+// ============================================================
+// МЕТРИКИ (каждые 60 сек)
+// ============================================================
+setInterval(() => {
+  console.log(`[M] rooms=${rooms.size} clients=${clients.size} bans=${bannedHashes.size} ipBans=${ipBanList.size}`);
+}, 60000);
+
+console.log(`[S] WebSocket relay + MaxAC listening on port ${port}`);
