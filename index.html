@@ -707,15 +707,13 @@ class GameScene extends Phaser.Scene {
     const h = this.scale.height
     const shortSide = Math.min(w, h)
 
-    /* Сколько world-пикселей видно по короткой стороне экрана.
-       700 — золотая середина для карты 1200×800.
-       Меньше — крупнее игрок и меньше обзор.
-       Больше — мельче игрок и больше обзор. */
-    const worldView = 700
+    /* Телефоны (короткая сторона < 600) — уменьшаем world-view,
+       чтобы игрок выглядел крупнее. Планшеты/десктоп — оставляем как было. */
+    const worldView = shortSide < 600 ? 450 : 700
 
-    const zoom = clamp(shortSide / worldView, 0.5, 3.0)
+    const zoom = clamp(shortSide / worldView, 0.9, 2.5)
     this.cameras.main.setZoom(zoom)
-    DBG.log('CAM', 'viewport:', w + '×' + h, 'zoom:', zoom.toFixed(2))
+    DBG.log('CAM', 'viewport:', w + '×' + h, 'shortSide:', shortSide, 'zoom:', zoom.toFixed(2))
   }
 
   /* =========== INPUT =========== */
