@@ -85,7 +85,7 @@ const CFG = {
   PLAYER_R: 18, SPEED: 240,
   BULLET_SPEED: 780, BULLET_R: 5, BULLET_LIFE: 1.4,
   FIRE_CD: 150, MAX_HP: 100, DAMAGE: 25, RESPAWN: 2500,
-  STATE_MS: 150, INPUT_MS: 66,
+  STATE_MS: 66, INPUT_MS: 66,
 }
 
 const AC_CFG = {
@@ -1629,7 +1629,7 @@ class GameScene extends Phaser.Scene {
         if (!v.init){ v.init = true; v.sprite.x = v.tx; v.sprite.y = v.ty }
         else { v.sprite.x = v.tx; v.sprite.y = v.ty }
       } else if (v.buffer && v.buffer.length >= 2){
-        const renderTime = performance.now() - 100
+        const renderTime = performance.now() - 40
         let a = v.buffer[0], b = v.buffer[v.buffer.length-1]
         for (let i = 0; i < v.buffer.length - 1; i++){
           if (v.buffer[i].t <= renderTime && v.buffer[i+1].t > renderTime){

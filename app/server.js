@@ -156,6 +156,10 @@ function checkRate(c){
 wss.on('connection', (ws, req) => {
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
 
+  if (ws._socket && ws._socket.setNoDelay){
+    ws._socket.setNoDelay(true)
+  }
+
   // IP-бан
   const banUntil = ipBanList.get(ip);
   if (banUntil && banUntil > Date.now()){
