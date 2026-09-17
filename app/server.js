@@ -148,7 +148,7 @@ function checkRate(c){
   return true;
 }
 
-// 🆕 Централизованная очистка клиента
+// Централизованная очистка клиента
 function cleanupClient(ws, reason){
   const c = clients.get(ws.peerId);
   if (!c) return;
@@ -327,6 +327,7 @@ wss.on('connection', (ws, req) => {
       }
     }
 
+    // ---- РЕЛЕЙ ----
     const room = rooms.get(c.room);
     if (!room) return;
 
@@ -337,9 +338,15 @@ wss.on('connection', (ws, req) => {
       }
     } else if (msg.data){
       for (const peer of room){
-        if (peer !== ws && peer.readyState === 1){
-          try { peer.send(JSON.stringify({ ...msg.data, from: c.peerId })); } catch {}
+        if (peer === ws) continue;
+        if (peer.readyState !== 1) continue;
+
+        /* 🆕 ФИКС: не отправляем bl владельцу пули — он нарисовал её локально */
+        if (msg.data.a === 'bl' && msg.data.d && msg.data.d.owner === peer.peerId){
+          continue;
         }
+
+        try { peer.send(JSON.stringify({ ...msg.data, from: c.peerId })); } catch {}
       }
     }
   });
@@ -350,7 +357,7 @@ wss.on('connection', (ws, req) => {
 });
 
 // ============================================================
-// HEARTBEAT — 10 секунд (быстро находит мёртвые сокеты)
+// HEARTBEAT — 10 секунд
 // ============================================================
 setInterval(() => {
   wss.clients.forEach(ws => {
@@ -365,7 +372,7 @@ setInterval(() => {
 }, 10000);
 
 // ============================================================
-// АВТООЧИСТКА ОСИРОТЕВШИХ КЛИЕНТОВ (раз в 15 сек)
+// АВТООЧИСТКА ОСИРОТЕВШИХ (раз в 15 сек)
 // ============================================================
 setInterval(() => {
   const activeIds = new Set([...wss.clients].map(ws => ws.peerId));
