@@ -94,16 +94,13 @@ const CFG = {
   FIRE_CD: 150, MAX_HP: 100, DAMAGE: 25, RESPAWN: 2500,
   STATE_MS: 100, INPUT_MS: 66,
 
-  /* 📐 Размеры спрайтов на экране */
   PLAYER_W: 56, PLAYER_H: 48,
   BULLET_SIZE: 14,
 
-  /* 🌈 Неоновые цвета стен и пола */
   WALL_COLOR:  0xff2266,
   FLOOR_COLOR: 0x1133ff,
   FLOOR_TINT_ALPHA: 1.0,
 
-  /* ✨ Свечение */
   WALL_GLOW:  true,
   FLOOR_GLOW: true,
 }
@@ -727,7 +724,7 @@ class GameScene extends Phaser.Scene {
     this._lastVisibleCalc = 0
     this._visibleCache = {}
     this.scores = {}
-    this.peerNames = {}          /* 🆕 peerId -> name */
+    this.peerNames = {}
     this._lastLocalShot = 0
 
     /* голосование */
@@ -962,6 +959,11 @@ class GameScene extends Phaser.Scene {
         DBG.log('PEER', '👋 peer left:', msg.peerId)
         this.peers.delete(msg.peerId)
         this.onPeerLeft(msg.peerId)
+        /* 🆕 Принудительно чистим view/score/name сразу, не дожидаясь state */
+        this.destroyView(msg.peerId)
+        delete this.scores[msg.peerId]
+        delete this.peerNames[msg.peerId]
+        delete this.worldPlayers[msg.peerId]
         this.updateStatus()
         return
       }
@@ -1008,7 +1010,6 @@ class GameScene extends Phaser.Scene {
     if (oldId === newId) return
     DBG.log('NET', 'my id:', oldId?.slice(0,12) || '?', '→', newId.slice(0,12))
 
-    /* Переносим view */
     const v = this.views[oldId]
     if (v){
       this.views[newId] = v
@@ -1018,7 +1019,6 @@ class GameScene extends Phaser.Scene {
       DBG.warn('NET', 'no view found for old id', oldId)
     }
 
-    /* Переносим имя */
     if (this.peerNames[oldId]){
       this.peerNames[newId] = this.peerNames[oldId]
       delete this.peerNames[oldId]
@@ -1112,13 +1112,11 @@ class GameScene extends Phaser.Scene {
     }
   }
   async onNetIdentity(data, fromId){
-    /* 🆕 Обрабатываем имя сразу */
     if (data.name){
       const n = cleanName(data.name)
       if (n){
         this.peerNames[fromId] = n
         DBG.log('NAME', fromId.slice(0,8), '→', n)
-        /* Обновляем текст над спрайтом */
         const v = this.views[fromId]
         if (v && v.label) v.label.setText(n)
         this.renderScores()
@@ -1374,6 +1372,9 @@ class GameScene extends Phaser.Scene {
 
     const rows = []
     for (const id in this.scores){
+      /* 🆕 Пропускаем тех, кто уже вышел */
+      if (id !== this.myPeerId && !this.peers.has(id)) continue
+
       const score = this.scores[id]
       const v = this.views[id]
       const isMe = id === this.myPeerId
@@ -1398,7 +1399,6 @@ class GameScene extends Phaser.Scene {
   applyState(data){
     if (!data || !data.p) return
 
-    /* 🆕 Имена от хоста */
     if (data.names){
       for (const id in data.names){
         const n = cleanName(data.names[id])
@@ -1414,6 +1414,9 @@ class GameScene extends Phaser.Scene {
     }
 
     for (const id in data.p){
+      /* 🆕 Пропускаем пакеты о тех, кого уже нет в комнате */
+      if (id !== this.myPeerId && !this.peers.has(id)) continue
+
       const [x,y,ax,ay,hp,dead] = data.p[id]
       if (id === this.myPeerId){
         this.local.hp = hp
@@ -1435,8 +1438,15 @@ class GameScene extends Phaser.Scene {
         v.hp = hp; v.dead = !!dead
       }
     }
+
+    /* 🆕 Удаляем view тех, кого нет ни в state, ни в this.peers */
     for (const id in this.views){
-      if (id !== this.myPeerId && !(id in data.p)) this.destroyView(id)
+      if (id === this.myPeerId) continue
+      if (!(id in data.p) || !this.peers.has(id)){
+        this.destroyView(id)
+        delete this.scores[id]
+        delete this.peerNames[id]
+      }
     }
   }
 
@@ -1477,7 +1487,6 @@ class GameScene extends Phaser.Scene {
       .setDepth(10)
       .setTint(colorFromId(id))
     const bar = this.add.graphics().setDepth(11)
-    /* 🆕 Имя над игроком */
     const label = this.add.text(0, 0, this.peerNames[id] || id.slice(0, 6), {
       fontFamily: 'monospace',
       fontSize: '11px',
@@ -1681,7 +1690,6 @@ class GameScene extends Phaser.Scene {
         scores[id] = Math.round(this.worldPlayers[id].score || 0)
       }
 
-      /* 🆕 Таблица имён */
       const names = {}
       for (const id in this.peerNames){
         names[id] = this.peerNames[id]
@@ -1745,6 +1753,12 @@ class GameScene extends Phaser.Scene {
   renderPlayers(time, dt){
     const k = Math.min(1, dt*14)
     for (const id in this.views){
+      /* 🆕 Если игрока уже нет в комнате — не рендерим и удаляем */
+      if (id !== this.myPeerId && !this.peers.has(id)){
+        this.destroyView(id)
+        continue
+      }
+
       const v = this.views[id]
 
       if (id === this.myPeerId){
@@ -1789,7 +1803,6 @@ class GameScene extends Phaser.Scene {
         v.bar.fillStyle(v.hp>50?0x3fb950:v.hp>25?0xd29922:0xf85149, 1)
         v.bar.fillRect(bx, by, w, 5)
 
-        /* 🆕 Позиция имени над головой */
         if (v.label){
           const currentName = this.peerNames[id] || id.slice(0, 6)
           if (v.label.text !== currentName) v.label.setText(currentName)
@@ -1812,6 +1825,8 @@ class GameScene extends Phaser.Scene {
     this.destroyView(id)
     delete this.inputs[id]
     delete this.worldPlayers[id]
+    delete this.scores[id]
+    delete this.peerNames[id]
     this.peers.delete(id)
     if (this.isHost){
       const p = this.ac.peers.get(id)
