@@ -36,7 +36,7 @@
   #ac{position:fixed;top:96px;right:8px;color:#ff2266;
       font:clamp(9px,1.5vmin,13px) monospace;
       z-index:6;text-align:right;pointer-events:none;white-space:pre;opacity:.85;line-height:1.4;}
-  #voteBtn{position:fixed;top:8px;right:8px;
+  #voteBtn{position:fixed;top:8px;right:60px;
            padding:clamp(8px,1.5vmin,14px) clamp(12px,2.2vmin,22px);
            font:clamp(11px,1.8vmin,15px) monospace;
            background:#30363d;color:#e6edf3;border:0;border-radius:6px;
@@ -44,6 +44,11 @@
   #voteBtn:active{background:#484f58;}
   #voteBtn.armed{background:#ff2266;color:#fff;font-weight:bold;
                  box-shadow:0 0 12px #ff2266;}
+  #soundBtn{position:fixed;top:8px;right:8px;width:44px;height:44px;
+            padding:0;font-size:20px;line-height:44px;text-align:center;
+            background:#30363d;color:#e6edf3;border:0;border-radius:6px;
+            z-index:7;pointer-events:auto;cursor:pointer;}
+  #soundBtn:active{background:#484f58;}
   #voteInfo{position:fixed;top:44px;right:8px;color:#ff2266;
             font:clamp(10px,1.6vmin,14px) monospace;
             z-index:7;text-align:right;pointer-events:none;white-space:pre;line-height:1.4;}
@@ -73,6 +78,7 @@
 <div id="voteInfo"></div>
 <div id="ac"></div>
 <button id="voteBtn" style="display:none">VOTE HOST</button>
+<button id="soundBtn" style="display:none">🔊</button>
 
 <div id="menu">
   <h1>Shoot'n'cats</h1>
@@ -82,7 +88,7 @@
   <div id="hint">
     Левый стик — движение<br>
     Правый стик — прицел и огонь<br>
-    Ловит ящики: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит
+    Бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💀 ваншот (независим)
   </div>
   <div id="pid">…generating identity…</div>
 </div>
@@ -117,10 +123,17 @@ const CFG = {
   PICKUP_RADIUS:     24,
   BONUS_DURATION:    20000,
   BONUS_HP_AMOUNT:   40,
-  BONUS_FIRE_MUL:    0.5,
+  BONUS_FIRE_MUL:    0.5,      // ⚡ rapid: во сколько раз быстрее стрельба
   BONUS_HOMING_TURN: 0.12,
   BONUS_HOMING_NOISE: 0.4,
   BONUS_RICOCHET_MAX: 2,
+  BONUS_HOMING_FIRE_CD: 2000,   // 🎯 самонаведение: раз в 2 сек
+  BONUS_ONESHOT_FIRE_CD: 5000,  // 💀 ваншот: раз в 5 сек
+  BONUS_ONESHOT_DAMAGE: 999,    // 💀 ваншот: 1 удар = смерть
+
+  SFX_MAX_DIST:      1400,
+  SFX_MASTER:        0.55,
+  AMBIENT_ENABLED:   true,
 }
 
 const AC_CFG = {
@@ -138,7 +151,7 @@ const AC_CFG = {
 
 const APP_ID = 'p2p-shooter-identity-v1'
 const VOTE_DURATION_MS = 20000
-const RELAY_URL = 'wss://shoooterr.relaxdev.ru'
+const RELAY_URL = 'wss://shooterr.relaxdev.ru'
 
 /* ============================================================
    2. DEBUG
@@ -213,20 +226,257 @@ function lineOfSight(x1,y1,x2,y2,walls){
 }
 
 /* ============================================================
-   4. IDENTITY
+   4. SOUND ENGINE
+   ============================================================ */
+class SoundEngine {
+  constructor(){
+    this.ctx = null; this.master = null; this.reverb = null
+    this.noiseBuf = null; this.ready = false
+    this.enabled = localStorage.getItem('sfx_enabled') !== '0'
+    this._ambient = null
+  }
+  init(){
+    if (this.ctx) return
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return
+    try { this.ctx = new Ctx() } catch(e){ return }
+
+    this.master = this.ctx.createGain()
+    this.master.gain.value = this.enabled ? CFG.SFX_MASTER : 0
+
+    const comp = this.ctx.createDynamicsCompressor()
+    comp.threshold.value = -16; comp.knee.value = 22
+    comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.25
+
+    this.master.connect(comp); comp.connect(this.ctx.destination)
+
+    this.reverb = this.ctx.createConvolver()
+    this.reverb.buffer = this._makeIR(1.6, 2.4)
+    this.noiseBuf = this._makeNoise(0.6)
+
+    this.ready = true
+    if (this.ctx.state === 'suspended') this.ctx.resume()
+  }
+  _makeNoise(dur){
+    const sr = this.ctx.sampleRate
+    const len = Math.floor(sr * dur)
+    const buf = this.ctx.createBuffer(1, len, sr)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1
+    return buf
+  }
+  _makeIR(dur, decay){
+    const sr = this.ctx.sampleRate
+    const len = Math.floor(sr * dur)
+    const buf = this.ctx.createBuffer(2, len, sr)
+    for (let c = 0; c < 2; c++){
+      const d = buf.getChannelData(c)
+      for (let i = 0; i < len; i++){
+        const t = i / len
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay)
+      }
+    }
+    return buf
+  }
+  _throttle(key, ms){
+    if (!this._thr) this._thr = {}
+    const now = performance.now()
+    if (this._thr[key] && now - this._thr[key] < ms) return false
+    this._thr[key] = now
+    return true
+  }
+  setEnabled(v){
+    this.enabled = !!v
+    localStorage.setItem('sfx_enabled', this.enabled ? '1' : '0')
+    if (this.master){
+      const t = this.ctx.currentTime
+      this.master.gain.cancelScheduledValues(t)
+      this.master.gain.linearRampToValueAtTime(this.enabled ? CFG.SFX_MASTER : 0, t + 0.15)
+    }
+  }
+  _tone({freq=440, freqEnd=null, type='sine', dur=0.2, vol=0.3, attack=0.005, pan=0, send=0}){
+    if (!this.ready || !this.enabled || vol <= 0.0001) return
+    const t0 = this.ctx.currentTime
+    const osc = this.ctx.createOscillator()
+    osc.type = type
+    osc.frequency.setValueAtTime(freq, t0)
+    if (freqEnd != null && freqEnd > 0){
+      try { osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), t0 + dur) } catch(e){}
+    }
+    const g = this.ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t0)
+    g.gain.linearRampToValueAtTime(Math.max(0.0002, vol), t0 + attack)
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + Math.max(attack + 0.02, dur))
+    let panner = null
+    if (this.ctx.createStereoPanner){
+      panner = this.ctx.createStereoPanner()
+      panner.pan.value = clamp(pan, -1, 1)
+    }
+    osc.connect(g)
+    if (panner){ g.connect(panner); panner.connect(this.master) }
+    else g.connect(this.master)
+    if (send > 0){
+      const s = this.ctx.createGain()
+      s.gain.value = send
+      g.connect(s); s.connect(this.reverb)
+    }
+    osc.start(t0); osc.stop(t0 + dur + 0.08)
+  }
+  _noise({dur=0.1, vol=0.3, type='lowpass', freq=2000, freqEnd=null, pan=0, send=0}){
+    if (!this.ready || !this.enabled || vol <= 0.0001) return
+    const t0 = this.ctx.currentTime
+    const src = this.ctx.createBufferSource()
+    src.buffer = this.noiseBuf
+    const filter = this.ctx.createBiquadFilter()
+    filter.type = type
+    filter.frequency.setValueAtTime(freq, t0)
+    if (freqEnd != null && freqEnd > 0){
+      try { filter.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), t0 + dur) } catch(e){}
+    }
+    const g = this.ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t0)
+    g.gain.linearRampToValueAtTime(Math.max(0.0002, vol), t0 + 0.003)
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
+    let panner = null
+    if (this.ctx.createStereoPanner){
+      panner = this.ctx.createStereoPanner()
+      panner.pan.value = clamp(pan, -1, 1)
+    }
+    src.connect(filter); filter.connect(g)
+    if (panner){ g.connect(panner); panner.connect(this.master) }
+    else g.connect(this.master)
+    if (send > 0){
+      const s = this.ctx.createGain()
+      s.gain.value = send
+      g.connect(s); s.connect(this.reverb)
+    }
+    src.start(t0); src.stop(t0 + dur + 0.08)
+  }
+  shoot(kind = 'normal', pan = 0, volMul = 1){
+    if (!this._throttle('shoot', 15)) return
+    const V = 0.22 * volMul
+    if (kind === 'oneshot'){
+      this._tone({freq: 140, freqEnd: 40, type:'sawtooth', dur:0.35, vol:V*1.2, pan, send:0.4})
+      this._noise({dur:0.28, vol:V*1.1, type:'lowpass', freq:2400, freqEnd:180, pan, send:0.4})
+      this._tone({freq: 900, freqEnd: 200, type:'square', dur:0.18, vol:V*0.5, pan, send:0.4})
+      return
+    }
+    if (kind === 'homing' || kind === 'homingRicochet'){
+      this._tone({freq: 900, freqEnd: 1800, type:'triangle', dur:0.13, vol:V*0.8, pan, send:0.15})
+      this._tone({freq: 1400, freqEnd: 2200, type:'sine', dur:0.11, vol:V*0.5, pan, send:0.15})
+    } else if (kind === 'ricochet'){
+      this._noise({dur:0.08, vol:V*0.9, type:'highpass', freq:1400, pan, send:0.12})
+      this._tone({freq: 1200, freqEnd: 800, type:'square', dur:0.08, vol:V*0.35, pan, send:0.1})
+    } else {
+      this._noise({dur:0.09, vol:V, type:'lowpass', freq:3200, freqEnd:700, pan, send:0.12})
+      this._tone({freq: 200, freqEnd: 60, type:'sawtooth', dur:0.12, vol:V*0.5, pan, send:0.08})
+    }
+  }
+  hitPlayer(pan = 0, volMul = 1){
+    if (!this._throttle('hitp', 30)) return
+    const V = 0.28 * volMul
+    this._tone({freq: 260, freqEnd: 130, type:'square', dur:0.08, vol:V, pan, send:0.15})
+    this._noise({dur:0.06, vol:V*0.7, type:'lowpass', freq:900, pan})
+  }
+  hitShield(pan = 0, volMul = 1){
+    const V = 0.26 * volMul
+    this._tone({freq: 1600, freqEnd: 2400, type:'sine', dur:0.26, vol:V, pan, send:0.4})
+    this._tone({freq: 2400, freqEnd: 3200, type:'triangle', dur:0.2, vol:V*0.6, pan, send:0.4})
+  }
+  death(pan = 0, volMul = 1){
+    const V = 0.32 * volMul
+    this._tone({freq: 420, freqEnd: 60, type:'sawtooth', dur:0.7, vol:V, pan, send:0.5})
+    this._noise({dur:0.5, vol:V*0.6, type:'lowpass', freq:1400, freqEnd:80, pan, send:0.5})
+  }
+  kill(pan = 0, volMul = 1){
+    const V = 0.3 * volMul
+    this._tone({freq: 820, freqEnd: 160, type:'square', dur:0.22, vol:V, pan, send:0.2})
+    this._noise({dur:0.14, vol:V*0.6, type:'bandpass', freq:1800, pan, send:0.2})
+  }
+  respawn(pan = 0, volMul = 1){
+    const V = 0.2 * volMul
+    this._tone({freq: 300, freqEnd: 600, type:'sine', dur:0.3, vol:V, pan, send:0.3})
+    this._tone({freq: 450, freqEnd: 900, type:'sine', dur:0.3, vol:V*0.7, pan, send:0.3})
+    this._tone({freq: 600, freqEnd: 1200, type:'triangle', dur:0.35, vol:V*0.5, pan, send:0.3})
+  }
+  pickup(type = 'hp', pan = 0, volMul = 1){
+    const V = 0.26 * volMul
+    if (type === 'hp'){
+      this._tone({freq: 500, freqEnd: 820, type:'sine', dur:0.2, vol:V, pan, send:0.25})
+      this._tone({freq: 750, freqEnd: 1230, type:'sine', dur:0.2, vol:V*0.6, pan, send:0.25})
+    } else if (type === 'rapid'){
+      this._tone({freq: 400, freqEnd: 1600, type:'square', dur:0.2, vol:V*0.8, pan, send:0.15})
+      this._tone({freq: 800, freqEnd: 2000, type:'sine', dur:0.15, vol:V*0.5, pan, send:0.15})
+    } else if (type === 'homing'){
+      this._tone({freq: 800, freqEnd: 1400, type:'triangle', dur:0.25, vol:V, pan, send:0.3})
+      this._tone({freq: 1200, freqEnd: 1800, type:'sine', dur:0.25, vol:V*0.6, pan, send:0.3})
+    } else if (type === 'ricochet'){
+      this._tone({freq: 1200, freqEnd: 500, type:'triangle', dur:0.22, vol:V, pan, send:0.2})
+      this._tone({freq: 1600, freqEnd: 700, type:'sine', dur:0.22, vol:V*0.6, pan, send:0.2})
+    } else if (type === 'shield'){
+      this._tone({freq: 1000, freqEnd: 1800, type:'sine', dur:0.35, vol:V, pan, send:0.5})
+      this._tone({freq: 1500, freqEnd: 2400, type:'triangle', dur:0.3, vol:V*0.7, pan, send:0.5})
+    } else if (type === 'oneshot'){
+      this._tone({freq: 300, freqEnd: 1200, type:'sawtooth', dur:0.35, vol:V*1.1, pan, send:0.35})
+      this._tone({freq: 180, freqEnd: 90, type:'square', dur:0.4, vol:V*0.8, pan, send:0.35})
+      this._noise({dur:0.25, vol:V*0.5, type:'bandpass', freq:600, pan, send:0.35})
+    } else {
+      this._tone({freq: 700, freqEnd: 1100, type:'sine', dur:0.2, vol:V, pan, send:0.2})
+    }
+  }
+  pickupSpawn(pan = 0, volMul = 1){
+    const V = 0.07 * volMul
+    this._tone({freq: 1200, freqEnd: 900, type:'sine', dur:0.14, vol:V, pan, send:0.25})
+  }
+  ricochetTick(pan = 0, volMul = 1){
+    if (!this._throttle('ric', 40)) return
+    const V = 0.11 * volMul
+    this._tone({freq: 2000, freqEnd: 1400, type:'sine', dur:0.06, vol:V, pan, send:0.15})
+  }
+  join(pan = 0, volMul = 1){
+    const V = 0.16 * volMul
+    this._tone({freq: 500, freqEnd: 900, type:'sine', dur:0.2, vol:V, pan, send:0.2})
+    this._tone({freq: 750, freqEnd: 1200, type:'sine', dur:0.2, vol:V*0.6, pan, send:0.2})
+  }
+  leave(pan = 0, volMul = 1){
+    const V = 0.15 * volMul
+    this._tone({freq: 900, freqEnd: 400, type:'sine', dur:0.25, vol:V, pan, send:0.2})
+  }
+  startAmbient(){
+    if (!this.ready || this._ambient || !CFG.AMBIENT_ENABLED) return
+    const ctx = this.ctx
+    const now = ctx.currentTime
+    const g = ctx.createGain()
+    g.gain.value = 0.0001
+    g.gain.linearRampToValueAtTime(0.045, now + 3)
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'lowpass'; filter.frequency.value = 260; filter.Q.value = 0.8
+    const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 55
+    const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 82.5
+    const o3 = ctx.createOscillator(); o3.type = 'triangle'; o3.frequency.value = 110
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07
+    const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.018
+    lfo.connect(lfoGain); lfoGain.connect(g.gain)
+    o1.connect(filter); o2.connect(filter); o3.connect(filter)
+    filter.connect(g); g.connect(this.master)
+    o1.start(); o2.start(); o3.start(); lfo.start()
+    this._ambient = { g, o1, o2, o3, lfo, filter }
+  }
+}
+
+/* ============================================================
+   5. IDENTITY
    ============================================================ */
 class Identity {
   constructor(){
     this.ready=false; this.mode='none'; this.pubHash=null
     this.keyPair=null; this.pubJwk=null
   }
-
   async init(){
     if (!(window.isSecureContext && window.crypto && crypto.subtle)) {
       let stored = localStorage.getItem('p2p_fallback_id')
       if (!stored){ stored = randomToken(12); localStorage.setItem('p2p_fallback_id', stored) }
       this.pubHash = 'fb_' + stored; this.mode = 'fallback'; this.ready = true
-      DBG.log('ID', 'fallback mode', this.pubHash)
       return
     }
     const storeKey = 'p2p_ecdsa_key'
@@ -250,27 +500,23 @@ class Identity {
       }
       const hex = await this._sha256hex(JSON.stringify(this.pubJwk))
       this.pubHash = hex.slice(0,16); this.mode = 'crypto'; this.ready = true
-      DBG.log('ID', 'crypto mode ready', this.pubHash)
     } catch (e) {
       let stored2 = localStorage.getItem('p2p_fallback_id') || randomToken(12)
       localStorage.setItem('p2p_fallback_id', stored2)
       this.pubHash = 'fb_' + stored2; this.mode = 'fallback'; this.ready = true
     }
   }
-
   async _sha256hex(str){
     const buf = new TextEncoder().encode(str)
     const h = await crypto.subtle.digest('SHA-256', buf)
     return Array.from(new Uint8Array(h), b => b.toString(16).padStart(2,'0')).join('')
   }
-
   async sign(str){
     if (this.mode !== 'crypto' || !crypto?.subtle) return 'no-crypto'
     const buf = new TextEncoder().encode(str)
     const sig = await crypto.subtle.sign({name:'ECDSA', hash:'SHA-256'}, this.keyPair.privateKey, buf)
     return btoa(String.fromCharCode(...new Uint8Array(sig)))
   }
-
   async verify(pubJwk, str, sigB64){
     if (this.mode !== 'crypto' || !crypto?.subtle) return false
     if (!pubJwk || !sigB64) return false
@@ -285,7 +531,7 @@ class Identity {
 }
 
 /* ============================================================
-   5. АНТИЧИТ
+   6. АНТИЧИТ
    ============================================================ */
 const AC_LOG = []
 function acLog(msg){
@@ -322,24 +568,19 @@ class AntiCheat {
   }
   isPersistentlyBanned(pubHash){ return !!(pubHash && this.persistentBans.has(pubHash)) }
   addPersistentBan(pubHash){ if (!pubHash) return; this.persistentBans.add(pubHash); this.savePersistentBans() }
-
   ensure(id){
     let p = this.peers.get(id)
     if (!p) {
-      p = {
-        strikes:0, lastStrike:0, suspicion:0, lastUpdate:performance.now(),
-        inputTimes:[], lastSeq:-1, token:null, sigRequiredAt:0,
-        lastFire:0, shotsFired:0, shotsHit:0,
-        aimHistory:[], lastPos:null, lastPosT:0, rtt:0,
-        pubHash:null, pubJwk:null, verified:false,
-        nonce:null, nonceSentAt:0,
-      }
+      p = { strikes:0, lastStrike:0, suspicion:0, lastUpdate:performance.now(),
+            inputTimes:[], lastSeq:-1, token:null, sigRequiredAt:0,
+            lastFire:0, shotsFired:0, shotsHit:0,
+            aimHistory:[], lastPos:null, lastPosT:0, rtt:0,
+            pubHash:null, pubJwk:null, verified:false, nonce:null }
       this.peers.set(id, p)
     }
     return p
   }
   remove(id){ this.peers.delete(id); this.histories.delete(id) }
-
   strike(id, reason, w=1){
     const p = this.ensure(id)
     p.strikes += w; p.lastStrike = performance.now()
@@ -361,7 +602,6 @@ class AntiCheat {
     if (p.strikes > 0 && now - p.lastStrike > AC_CFG.STRIKE_DECAY_MS){ p.strikes--; p.lastStrike = now }
     if (p.suspicion > 0) p.suspicion = Math.max(0, p.suspicion - AC_CFG.SUSPICION_DECAY * dtSec)
   }
-
   issueToken(id){
     const p = this.ensure(id)
     p.token = randomToken(16)
@@ -369,7 +609,6 @@ class AntiCheat {
     return p.token
   }
   setMyToken(tok){ this.myToken = tok }
-
   sign(fields){
     const s = `${this.myToken}|${this.seq}|${fields.m[0]}|${fields.m[1]}|${fields.a[0]}|${fields.a[1]}|${fields.f}`
     return fnv1a(s)
@@ -379,52 +618,39 @@ class AntiCheat {
     const s = `${p.token}|${payload.seq}|${payload.m[0]}|${payload.m[1]}|${payload.a[0]}|${payload.a[1]}|${payload.f}`
     return fnv1a(s) === payload.sig
   }
-
   validateInput(id, data){
     if (this.bans.has(id)) return false
     const p = this.ensure(id)
     const now = performance.now()
     p.lastUpdate = now
-
     let size = 0
     try { size = JSON.stringify(data).length } catch { return this.strike(id,'unserializable',AC_CFG.STRIKE_SEVERE) }
     if (size > AC_CFG.MAX_PACKET_BYTES) return this.strike(id, `oversized`, AC_CFG.STRIKE_SEVERE)
-
     if (!data || typeof data !== 'object') return this.strike(id, 'not object', AC_CFG.STRIKE_SEVERE)
     if (!this.pair(data.m) || !this.pair(data.a)) return this.strike(id, 'bad vectors', AC_CFG.STRIKE_SEVERE)
     if (typeof data.f !== 'number' || (data.f !== 0 && data.f !== 1)) return this.strike(id, 'bad fire', AC_CFG.STRIKE_SEVERE)
     if (typeof data.seq !== 'number' || !Number.isFinite(data.seq)) return this.strike(id, 'no seq', AC_CFG.STRIKE_SEVERE)
-
     p.inputTimes.push(now)
     while (p.inputTimes.length && now - p.inputTimes[0] > 1000) p.inputTimes.shift()
-    if (p.inputTimes.length > AC_CFG.MAX_INPUT_HZ)
-      return this.strike(id, `flood`, AC_CFG.STRIKE_SEVERE)
-
-    if (data.seq <= p.lastSeq)
-      return this.strike(id, `replay`, AC_CFG.STRIKE_SEVERE)
-    if (p.lastSeq >= 0 && data.seq > p.lastSeq + AC_CFG.MAX_SEQ_GAP)
-      return this.strike(id, `seq jump`, 1)
+    if (p.inputTimes.length > AC_CFG.MAX_INPUT_HZ) return this.strike(id, `flood`, AC_CFG.STRIKE_SEVERE)
+    if (data.seq <= p.lastSeq) return this.strike(id, `replay`, AC_CFG.STRIKE_SEVERE)
+    if (p.lastSeq >= 0 && data.seq > p.lastSeq + AC_CFG.MAX_SEQ_GAP) return this.strike(id, `seq jump`, 1)
     p.lastSeq = data.seq
-
-    if (p.token && now > p.sigRequiredAt && !this.verify(id, data))
-      return this.strike(id, 'bad signature', AC_CFG.STRIKE_SEVERE)
-
+    if (p.token && now > p.sigRequiredAt && !this.verify(id, data)) return this.strike(id, 'bad signature', AC_CFG.STRIKE_SEVERE)
     const clip = v => {
       const L = Math.hypot(v[0], v[1])
-      if (L > 1.05) { v[0] /= L; v[1] /= L }
-      if (L < AC_CFG.AIM_MIN_MAG && v === data.a) { v[0] = 1; v[1] = 0 }
-      if (L < 0.001) { v[0] = 0; v[1] = 0 }
+      if (L > 1.05){ v[0] /= L; v[1] /= L }
+      if (L < AC_CFG.AIM_MIN_MAG && v === data.a){ v[0] = 1; v[1] = 0 }
+      if (L < 0.001){ v[0] = 0; v[1] = 0 }
     }
     clip(data.m); clip(data.a)
     return true
   }
-
   pair(v){
     return Array.isArray(v) && v.length === 2 &&
       Number.isFinite(v[0]) && Number.isFinite(v[1]) &&
       Math.abs(v[0]) <= 10 && Math.abs(v[1]) <= 10
   }
-
   validateMovement(id, prev, next, dt){
     if (!prev) return { x: next.x, y: next.y }
     const dx = next.x - prev.x, dy = next.y - prev.y
@@ -441,16 +667,13 @@ class AntiCheat {
     }
     return { x: next.x, y: next.y }
   }
-
   validateFire(id, now, fireCd){
     const p = this.ensure(id)
     const min = fireCd * AC_CFG.FIRE_TOLERANCE
-    if (now - p.lastFire < min)
-      return this.strike(id, `rapid fire`, 1)
+    if (now - p.lastFire < min) return this.strike(id, `rapid fire`, 1)
     p.lastFire = now
     return true
   }
-
   recordAim(id, ax, ay, now){
     const p = this.ensure(id)
     const last = p.aimHistory[p.aimHistory.length-1]
@@ -465,7 +688,6 @@ class AntiCheat {
     p.aimHistory.push({ ax, ay, t: now })
     while (p.aimHistory.length && now - p.aimHistory[0].t > AC_CFG.AIM_HISTORY_MS) p.aimHistory.shift()
   }
-
   recordShot(id, hit){
     const p = this.ensure(id)
     p.shotsFired++
@@ -475,7 +697,6 @@ class AntiCheat {
       if (acc > AC_CFG.ACCURACY_SUSPICIOUS) p.suspicion += 0.6
     }
   }
-
   computeVisible(forId, all, walls, localPos){
     if (!AC_CFG.FOG_ENABLED) return Object.keys(all)
     const R2 = AC_CFG.FOG_RADIUS * AC_CFG.FOG_RADIUS
@@ -489,7 +710,6 @@ class AntiCheat {
     }
     return out
   }
-
   recordPosition(id, x, y){
     let h = this.histories.get(id)
     if (!h){ h = []; this.histories.set(id, h) }
@@ -498,7 +718,6 @@ class AntiCheat {
     const cut = now - AC_CFG.HISTORY_MS
     while (h.length && h[0].t < cut) h.shift()
   }
-
   rewindPosition(id, backMs){
     const h = this.histories.get(id)
     if (!h || h.length === 0) return null
@@ -507,7 +726,6 @@ class AntiCheat {
     while (lo < hi){ const mid = (lo + hi) >> 1; if (h[mid].t < target) lo = mid+1; else hi = mid }
     return h[lo]
   }
-
   tick(dtSec){
     const now = performance.now()
     for (const [id, p] of this.peers){
@@ -521,7 +739,7 @@ class AntiCheat {
 }
 
 /* ============================================================
-   6. LAG COMP
+   7. LAG COMP
    ============================================================ */
 function hostSimulateShot(ac, shooterId, shooterPos, aim, targets, walls){
   const { x, y } = shooterPos
@@ -551,7 +769,7 @@ function hostSimulateShot(ac, shooterId, shooterPos, aim, targets, walls){
 }
 
 /* ============================================================
-   7. КАРТА
+   8. КАРТА
    ============================================================ */
 const SPAWNS = [
   {x:120,y:120},{x:CFG.W-120,y:120},
@@ -583,7 +801,7 @@ function generateWalls(seedStr){
 }
 
 /* ============================================================
-   8. BOOT SCENE
+   9. BOOT SCENE
    ============================================================ */
 class BootScene extends Phaser.Scene {
   constructor(){ super('Boot') }
@@ -592,10 +810,7 @@ class BootScene extends Phaser.Scene {
     this.load.image('bullet', 'bullet.png')
     this.load.image('wall',   'wall.png')
     this.load.image('floor',  'floor.png')
-    this.load.on('loaderror', file => {
-      DBG.warn('BOOT', 'not found, generating stub:', file.key)
-      this.generateStub(file.key)
-    })
+    this.load.on('loaderror', file => this.generateStub(file.key))
   }
   generateStub(key){
     if (this.textures.exists(key)) return
@@ -610,7 +825,7 @@ class BootScene extends Phaser.Scene {
 }
 
 /* ============================================================
-   9. ИГРОВАЯ СЦЕНА
+   10. ИГРОВАЯ СЦЕНА
    ============================================================ */
 class GameScene extends Phaser.Scene {
   constructor(){ super('Game') }
@@ -619,8 +834,7 @@ class GameScene extends Phaser.Scene {
     this.roomId = this.registry.get('roomId') || 'arena1'
     this.identity = this.registry.get('identity')
     this.myName = this.registry.get('playerName') || 'anon'
-
-    DBG.log('GAME', 'scene created', { roomId: this.roomId, name: this.myName })
+    this.sfx = this.registry.get('sfx')
 
     /* Пол */
     this.floorSprite = this.add.tileSprite(0, 0, CFG.W, CFG.H, 'floor')
@@ -641,9 +855,8 @@ class GameScene extends Phaser.Scene {
       }
     }
     for (const r of this.wallRects){
-      const wall = this.add.image(r.x, r.y, 'wall')
-        .setOrigin(0).setDepth(-10).setDisplaySize(r.w, r.h).setTintFill(CFG.WALL_COLOR)
-      this.wallSprites.push(wall)
+      this.wallSprites.push(this.add.image(r.x, r.y, 'wall')
+        .setOrigin(0).setDepth(-10).setDisplaySize(r.w, r.h).setTintFill(CFG.WALL_COLOR))
     }
 
     /* Камера */
@@ -670,14 +883,14 @@ class GameScene extends Phaser.Scene {
     this._lastLocalShot = 0
     this._lastNameSent = 0
 
-    /* Ящики с бонусами */
+    /* Ящики */
     this.pickups = []
     this.pickupSprites = {}
     this.pickupSeq = 0
     this.lastPickupSpawn = 0
 
-    /* Локальные бонусы: [rapidUntil, homingUntil, ricochetUntil, shieldHits] */
-    this.localBonuses = [0, 0, 0, 0]
+    /* Локальные бонусы: [rapidUntil, homingUntil, ricochetUntil, shieldHits, oneshotUntil] */
+    this.localBonuses = [0, 0, 0, 0, 0]
 
     /* Голосование */
     this.hostBlacklist = new Set()
@@ -695,11 +908,11 @@ class GameScene extends Phaser.Scene {
     this.serverHostId = null
     this.reconnectAttempts = 0
 
-    /* Локальное состояние */
+    /* Локальное */
     this.local = { x:SPAWNS[0].x, y:SPAWNS[0].y, aimX:1, aimY:0, hp:CFG.MAX_HP, dead:false, score:0 }
     this.predicted = { x:this.local.x, y:this.local.y }
 
-    /* Античит + identity */
+    /* Античит */
     this.ac = new AntiCheat(this)
     this.ac.identity = this.identity
 
@@ -709,8 +922,15 @@ class GameScene extends Phaser.Scene {
     this.scoresEl = document.getElementById('scores')
     this.voteBtn  = document.getElementById('voteBtn')
     this.voteInfo = document.getElementById('voteInfo')
+    this.soundBtn = document.getElementById('soundBtn')
     this.voteBtn.style.display = ''
+    this.soundBtn.style.display = ''
+    this.soundBtn.textContent = this.sfx.enabled ? '🔊' : '🔇'
     this.voteBtn.addEventListener('click', ()=> this.onVoteClick())
+    this.soundBtn.addEventListener('click', ()=>{
+      this.sfx.setEnabled(!this.sfx.enabled)
+      this.soundBtn.textContent = this.sfx.enabled ? '🔊' : '🔇'
+    })
 
     this.setupJoysticks()
 
@@ -719,22 +939,16 @@ class GameScene extends Phaser.Scene {
     this.createView(this.myPeerId)
 
     this.setupNetwork()
-
-    DBG.banner('GAME READY', '#3fb950')
   }
 
-  /* =========== ADAPTIVE CAMERA =========== */
   updateCameraZoom(){
-    const w = this.scale.width
-    const h = this.scale.height
+    const w = this.scale.width, h = this.scale.height
     const shortSide = Math.min(w, h)
     const worldView = shortSide < 600 ? 450 : 700
     const zoom = clamp(shortSide / worldView, 0.9, 2.5)
     this.cameras.main.setZoom(zoom)
-    DBG.log('CAM', 'viewport:', w + '×' + h, 'zoom:', zoom.toFixed(2))
   }
 
-  /* =========== INPUT =========== */
   setupJoysticks(){
     this.moveVec = { x:0, y:0 }
     this.aimVec = { x:1, y:0 }
@@ -765,12 +979,62 @@ class GameScene extends Phaser.Scene {
     joyR.on('end', ()=>{ this.firing = false })
   }
 
+  _spatial(srcX, srcY, mul=1){
+    const dx = srcX - this.local.x
+    const dy = srcY - this.local.y
+    const dist = Math.hypot(dx, dy)
+    const pan = clamp(dx / 500, -1, 1)
+    const vol = clamp(1 - dist / CFG.SFX_MAX_DIST, 0.1, 1) * mul
+    return { pan, vol }
+  }
+
+  /* ============================================================
+     🎁 ЛОГИКА БОНУСОВ
+
+     oneshot — отдельный бонус, не зависит от остальных:
+       пока активен: стрельба ТОЛЬКО ваншот-пулями с CD 5 сек,
+       rapid/homing/ricochet игнорируются.
+
+     rapid + homing/ricochet — работают вместе.
+     homing задаёт минимум CD 2 сек.
+     rapid уменьшает CD.
+     ricochet — флаг пули.
+     ============================================================ */
+  _computeFireBehavior(bonuses, now){
+    const rapid = bonuses[0] > now
+    const homing = bonuses[1] > now
+    const ricochet = bonuses[2] > now
+    const oneshot = bonuses[4] > now
+
+    if (oneshot){
+      return {
+        fireCd: CFG.BONUS_ONESHOT_FIRE_CD,
+        opts: { homing: false, ricochet: 0, oneshot: true },
+        kind: 'oneshot',
+      }
+    }
+
+    let fireCd = CFG.FIRE_CD
+    if (rapid) fireCd = CFG.FIRE_CD * CFG.BONUS_FIRE_MUL
+    if (homing) fireCd = Math.max(fireCd, CFG.BONUS_HOMING_FIRE_CD)
+
+    const opts = {
+      homing: homing,
+      ricochet: ricochet ? CFG.BONUS_RICOCHET_MAX : 0,
+      oneshot: false,
+    }
+    let kind = 'normal'
+    if (homing && ricochet) kind = 'homingRicochet'
+    else if (homing) kind = 'homing'
+    else if (ricochet) kind = 'ricochet'
+
+    return { fireCd, opts, kind }
+  }
+
   /* ============================================================
      NETWORK
      ============================================================ */
   setupNetwork(){
-    DBG.log('NET', 'connecting...')
-
     this.handlers = {
       in:   (d, id) => this.onNetInput(d, id),
       st:   (d, id) => this.onNetState(d, id),
@@ -782,19 +1046,7 @@ class GameScene extends Phaser.Scene {
       id:   (d, id) => this.onNetIdentity(d, id),
       vote: (d, id) => this.onNetVote(d, id),
     }
-
     this.connectToRelay()
-
-    setTimeout(()=>{
-      const n = this.peers.size + (this.myPeerId ? 1 : 0)
-      const ok = n > 1
-      DBG.banner(
-        `DIAG 30s: peers=${n} role=${this.isHost?'HOST':(this.hasBecomeClient?'CLIENT':'WAIT')}`,
-        ok ? '#3fb950' : '#f85149'
-      )
-      DBG.log('DIAG', 'myPeerId:', this.myPeerId, 'host:', this.serverHostId)
-      DBG.log('DIAG', 'peers:', [...this.peers])
-    }, 30000)
   }
 
   connectToRelay(){
@@ -802,8 +1054,6 @@ class GameScene extends Phaser.Scene {
     catch(e){ DBG.err('NET', 'ws fail', e); return }
 
     this.ws.onopen = () => {
-      DBG.log('NET', '*** WS CONNECTED ***')
-      DBG.banner('WS CONNECTED', '#3fb950')
       this.reconnectAttempts = 0
       this.ws.send(JSON.stringify({ type: 'join', room: this.roomId }))
     }
@@ -811,33 +1061,26 @@ class GameScene extends Phaser.Scene {
     this.ws.onmessage = ev => {
       let msg
       try { msg = JSON.parse(ev.data) } catch { return }
-      DBG.log('NET', '📩 recv:', msg.type || msg.a)
       const { type } = msg
 
       if (type === 'banned'){
-        DBG.err('NET', '🚫 BANNED:', msg.reason)
         try { this.ws.close() } catch {}
         alert('Вас забанил сервер античита: ' + msg.reason)
         return
       }
-      if (type === 'error'){ DBG.warn('NET', 'err:', msg.msg); return }
+      if (type === 'error') return
 
       if (type === 'welcome'){
         this.serverHostId = msg.host
-        DBG.log('NET', 'WELCOMED', msg.peerId, 'host:', msg.host, 'peers:', msg.peers)
         this.migrateMyId(msg.peerId)
         const iAmHost = (msg.host === msg.peerId)
-
         if (iAmHost){
-          DBG.log('NET', 'I AM HOST')
           this.isHost = true
           this.hasBecomeClient = false
           this.peerNames[this.myPeerId] = this.myName
           this.sendId({ pubHash:this.identity.pubHash, mode:this.identity.mode, name:this.myName }, this.myPeerId)
           this.becomeHost()
-          DBG.banner('YOU ARE HOST', '#ff2266')
         } else {
-          DBG.log('NET', 'I AM CLIENT, host =', msg.host)
           this.isHost = false
           this.hasBecomeClient = true
           for (const peerId of msg.peers){
@@ -858,7 +1101,7 @@ class GameScene extends Phaser.Scene {
       }
 
       if (type === 'peer-join'){
-        DBG.log('PEER', '🎉 peer joined:', msg.peerId)
+        this.sfx.join(0, 0.7)
         this.peers.add(msg.peerId)
         if (!this.views[msg.peerId]) this.createView(msg.peerId)
         this.ac.ensure(msg.peerId)
@@ -874,7 +1117,7 @@ class GameScene extends Phaser.Scene {
       }
 
       if (type === 'peer-leave'){
-        DBG.log('PEER', '👋 peer left:', msg.peerId)
+        this.sfx.leave(0, 0.7)
         this.peers.delete(msg.peerId)
         this.onPeerLeft(msg.peerId)
         this.destroyView(msg.peerId)
@@ -886,13 +1129,11 @@ class GameScene extends Phaser.Scene {
       }
 
       if (type === 'host-change'){
-        DBG.log('NET', 'HOST CHANGED →', msg.host)
         this.serverHostId = msg.host
         if (msg.host === this.myPeerId){
           this.isHost = true
           this.hasBecomeClient = false
           this.becomeHost()
-          DBG.banner('YOU ARE HOST', '#ff2266')
         } else {
           this.isHost = false
           this.hasBecomeClient = true
@@ -901,16 +1142,12 @@ class GameScene extends Phaser.Scene {
         return
       }
 
-      const action = msg.a
-      const fromId = msg.from
-      const data = msg.d
-      const h = this.handlers[action]
-      if (h) h(data, fromId)
+      const h = this.handlers[msg.a]
+      if (h) h(msg.d, msg.from)
     }
 
     this.ws.onerror = err => DBG.err('NET', 'ws err', err)
     this.ws.onclose = ev => {
-      DBG.warn('NET', 'ws closed', ev.code)
       if (this.reconnectAttempts < 30){
         this.reconnectAttempts++
         const delay = Math.min(2000 * this.reconnectAttempts, 10000)
@@ -922,7 +1159,6 @@ class GameScene extends Phaser.Scene {
   migrateMyId(newId){
     const oldId = this.myPeerId
     if (oldId === newId) return
-    DBG.log('NET', 'my id:', oldId?.slice(0,12) || '?', '→', newId.slice(0,12))
     const v = this.views[oldId]
     if (v){ this.views[newId] = v; delete this.views[oldId] }
     if (this.peerNames[oldId]){ this.peerNames[newId] = this.peerNames[oldId]; delete this.peerNames[oldId] }
@@ -979,6 +1215,18 @@ class GameScene extends Phaser.Scene {
       }
       if (fresh) return
     }
+    const owner = this.views[data.owner]
+    let kind = 'normal'
+    if (data.oneshot) kind = 'oneshot'
+    else if (data.homing && data.ricochet) kind = 'homingRicochet'
+    else if (data.homing) kind = 'homing'
+    else if (data.ricochet) kind = 'ricochet'
+    if (owner){
+      const sp = this._spatial(owner.sprite.x, owner.sprite.y)
+      this.sfx.shoot(kind, sp.pan, sp.vol)
+    } else {
+      this.sfx.shoot(kind, 0, 0.4)
+    }
     this.spawnGhostBullet(data)
   }
   onNetHit(data){
@@ -1022,7 +1270,6 @@ class GameScene extends Phaser.Scene {
       const n = cleanName(data.name)
       if (n){
         this.peerNames[fromId] = n
-        DBG.log('NAME', fromId.slice(0,8), '→', n)
         const v = this.views[fromId]
         if (v && v.label) v.label.setText(n)
         this.renderScores()
@@ -1033,9 +1280,7 @@ class GameScene extends Phaser.Scene {
       this.sendId({
         pubJwk: this.identity.pubJwk || null,
         pubHash: this.identity.pubHash,
-        sig,
-        mode: this.identity.mode,
-        name: this.myName,
+        sig, mode: this.identity.mode, name: this.myName,
       }, fromId)
     } else if (data.pubHash){
       if (!this.isHost) return
@@ -1043,8 +1288,7 @@ class GameScene extends Phaser.Scene {
       p.pubHash = data.pubHash
       p.pubJwk = data.pubJwk
       if (data.mode === 'crypto' && data.pubJwk && data.sig){
-        const ok = await this.identity.verify(data.pubJwk, p.nonce || '', data.sig)
-        p.verified = ok
+        p.verified = await this.identity.verify(data.pubJwk, p.nonce || '', data.sig)
       }
       if (this.ac.isPersistentlyBanned(data.pubHash)){ this.ac.ban(fromId, 'persistent ban', false); return }
       acLog(`✓ ${fromId.slice(0,6)} id:${(data.pubHash||'?').slice(0,6)}${p.verified?' v':''}`)
@@ -1064,7 +1308,6 @@ class GameScene extends Phaser.Scene {
     }
   }
   onPeerLeft(id){
-    DBG.log('PEER', '👋 onPeerLeft', id.slice(0,12))
     delete this.inputs[id]
     delete this.worldPlayers[id]
     delete this.scores[id]
@@ -1076,10 +1319,7 @@ class GameScene extends Phaser.Scene {
   }
 
   /* =========== HOST =========== */
-  currentHostId(){
-    if (this.isHost) return this.myPeerId
-    return this.serverHostId
-  }
+  currentHostId(){ return this.isHost ? this.myPeerId : this.serverHostId }
 
   isInsideWall(x, y, r){
     for (const w of this.wallRects){
@@ -1089,7 +1329,7 @@ class GameScene extends Phaser.Scene {
   }
 
   spawnPickup(){
-    const types = ['hp','rapid','homing','ricochet','shield']
+    const types = ['hp','rapid','homing','ricochet','shield','oneshot']
     const type = types[Math.floor(Math.random()*types.length)]
     let x, y, tries = 0
     do {
@@ -1100,13 +1340,14 @@ class GameScene extends Phaser.Scene {
     if (tries >= 40) return
     const id = 'pk_' + (++this.pickupSeq)
     this.pickups.push({ id, type, x, y })
-    DBG.log('PICKUP', 'spawn', type, 'at', Math.round(x), Math.round(y))
+    const sp = this._spatial(x, y, 0.6)
+    this.sfx.pickupSpawn(sp.pan, sp.vol)
   }
 
   applyPickup(id, type){
     const p = this.worldPlayers[id]
     if (!p) return
-    if (!p.bonuses) p.bonuses = { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0 }
+    if (!p.bonuses) this.resetBonuses(p)
     const now = performance.now()
     if (type === 'hp'){
       p.hp = Math.min(p.hp + CFG.BONUS_HP_AMOUNT, CFG.MAX_HP)
@@ -1118,12 +1359,19 @@ class GameScene extends Phaser.Scene {
       p.bonuses.ricochetUntil = now + CFG.BONUS_DURATION
     } else if (type === 'shield'){
       p.bonuses.shieldHits = (p.bonuses.shieldHits || 0) + 1
+    } else if (type === 'oneshot'){
+      p.bonuses.oneshotUntil = now + CFG.BONUS_DURATION
     }
-    DBG.log('PICKUP', id.slice(0,8), 'got', type)
+    if (id === this.myPeerId){
+      this.sfx.pickup(type, 0, 1)
+    } else {
+      const sp = this._spatial(p.x, p.y, 0.9)
+      this.sfx.pickup(type, sp.pan, sp.vol)
+    }
   }
 
   resetBonuses(p){
-    p.bonuses = { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0 }
+    p.bonuses = { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, oneshotUntil:0 }
   }
 
   syncPickups(list){
@@ -1133,9 +1381,10 @@ class GameScene extends Phaser.Scene {
       const [id, type, x, y] = list[i]
       seen.add(id)
       if (!this.pickupSprites[id]){
-        const emoji = { hp:'❤️', rapid:'⚡', homing:'🎯', ricochet:'🏓', shield:'🛡' }[type] || '❓'
+        const emoji = { hp:'❤️', rapid:'⚡', homing:'🎯', ricochet:'🏓', shield:'🛡', oneshot:'💀' }[type] || '❓'
         const t = this.add.text(x, y, emoji, { fontSize: '32px', fontFamily: 'monospace' })
           .setOrigin(0.5).setDepth(6).setAlpha(0.9)
+        t.setData('type', type)
         this.tweens.add({
           targets: t, scale: { from: 0.85, to: 1.15 },
           duration: 700, yoyo: true, repeat: -1,
@@ -1147,7 +1396,17 @@ class GameScene extends Phaser.Scene {
     }
     for (const id in this.pickupSprites){
       if (!seen.has(id)){
-        this.pickupSprites[id].destroy()
+        const sprite = this.pickupSprites[id]
+        const type = sprite.getData('type') || 'hp'
+        const dx = sprite.x - this.local.x
+        const dy = sprite.y - this.local.y
+        const dist = Math.hypot(dx, dy)
+        if (dist < 200){
+          const pan = clamp(dx / 500, -1, 1)
+          const vol = clamp(1 - dist / 300, 0.4, 1)
+          this.sfx.pickup(type, pan, vol)
+        }
+        sprite.destroy()
         delete this.pickupSprites[id]
       }
     }
@@ -1163,14 +1422,12 @@ class GameScene extends Phaser.Scene {
       y: (v && v.init && (v.tx||v.ty)) ? v.ty : spawn.y,
       vx:0, vy:0, aimX:1, aimY:0,
       hp: CFG.MAX_HP, dead:false, fireAt:0, respawnAt:0, score:0,
-      bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0 },
+      bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, oneshotUntil:0 },
     }
     if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
-    DBG.log('HOST', 'added player to world:', id.slice(0,12))
   }
 
   becomeHost(){
-    DBG.log('HOST', 'becomeHost() called')
     const myCurX = this.predicted.x, myCurY = this.predicted.y
     const meWasInit = Math.abs(myCurX) > 1 || Math.abs(myCurY) > 1
     this.worldPlayers = {}
@@ -1186,7 +1443,7 @@ class GameScene extends Phaser.Scene {
         vx:0, vy:0, aimX:1, aimY:0,
         hp: v ? v.hp : CFG.MAX_HP, dead: v ? v.dead : false,
         fireAt:0, respawnAt:0, score:0,
-        bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0 },
+        bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, oneshotUntil:0 },
       }
       if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
     }
@@ -1226,7 +1483,6 @@ class GameScene extends Phaser.Scene {
     this.voteDeadline = performance.now() + VOTE_DURATION_MS
     this.votes.clear()
     if (initiator) this.votes.set(initiator, target)
-    acLog(`🗳 голосование`)
     this.updateVoteUI()
   }
   castVote(voter, agree){
@@ -1285,9 +1541,14 @@ class GameScene extends Phaser.Scene {
     const bn = this.localBonuses
     const now = performance.now()
     const parts = []
-    if (bn[0] > now) parts.push(`⚡ ${Math.ceil((bn[0]-now)/1000)}s`)
-    if (bn[1] > now) parts.push(`🎯 ${Math.ceil((bn[1]-now)/1000)}s`)
-    if (bn[2] > now) parts.push(`🏓 ${Math.ceil((bn[2]-now)/1000)}s`)
+    if (bn[4] > now){
+      /* oneshot — приоритетный индикатор */
+      parts.push(`💀 ${Math.ceil((bn[4]-now)/1000)}s`)
+    } else {
+      if (bn[0] > now) parts.push(`⚡ ${Math.ceil((bn[0]-now)/1000)}s`)
+      if (bn[1] > now) parts.push(`🎯 ${Math.ceil((bn[1]-now)/1000)}s`)
+      if (bn[2] > now) parts.push(`🏓 ${Math.ceil((bn[2]-now)/1000)}s`)
+    }
     if (bn[3] > 0) parts.push(`🛡 ×${bn[3]}`)
     if (parts.length){
       this.bonusesEl.textContent = parts.join(' · ')
@@ -1348,15 +1609,16 @@ class GameScene extends Phaser.Scene {
       if (id === this.myPeerId){
         this.local.hp = hp
         this.local.dead = !!dead
-        if (bn && Array.isArray(bn) && bn.length === 4){
+        if (bn && Array.isArray(bn) && bn.length >= 4){
           this.localBonuses = [
             bn[0] > 0 ? now + bn[0] : 0,
             bn[1] > 0 ? now + bn[1] : 0,
             bn[2] > 0 ? now + bn[2] : 0,
             bn[3] || 0,
+            bn[4] > 0 ? now + bn[4] : 0,
           ]
         } else {
-          this.localBonuses = [0, 0, 0, 0]
+          this.localBonuses = [0, 0, 0, 0, 0]
         }
         const dx = x - this.predicted.x, dy = y - this.predicted.y
         if (Math.abs(dx) > 120 || Math.abs(dy) > 120){
@@ -1368,11 +1630,15 @@ class GameScene extends Phaser.Scene {
       } else {
         let v = this.views[id]
         if (!v){ v = this.createView(id); v.tx = x; v.ty = y; v.init = true; v.sprite.x = x; v.sprite.y = y }
+        const wasDead = v.dead
         if (!v.buffer) v.buffer = []
         v.buffer.push({ x, y, ax, ay, hp, dead, bn, t: now })
         while (v.buffer.length > 15) v.buffer.shift()
         v.tx = x; v.ty = y
         v.hp = hp; v.dead = !!dead
+        const sp = this._spatial(v.sprite.x, v.sprite.y)
+        if (wasDead && !v.dead) this.sfx.respawn(sp.pan, sp.vol * 0.8)
+        if (!wasDead && v.dead) this.sfx.death(sp.pan, sp.vol)
       }
     }
     for (const id in this.views){
@@ -1388,7 +1654,8 @@ class GameScene extends Phaser.Scene {
   spawnGhostBullet(d){
     if (this.ghostBullets[d.id]) return
     let color = 0xffe066
-    if (d.homing && d.ricochet) color = 0xff22ff
+    if (d.oneshot) color = 0xff2244
+    else if (d.homing && d.ricochet) color = 0xff22ff
     else if (d.homing) color = 0xff66ff
     else if (d.ricochet) color = 0x22ffff
     const s = this.add.image(d.x, d.y, 'bullet')
@@ -1406,7 +1673,29 @@ class GameScene extends Phaser.Scene {
       this.ghostBullets[d.bid].sprite.destroy()
       delete this.ghostBullets[d.bid]
     }
-    if (d.target === this.myPeerId){
+    const isMe = d.target === this.myPeerId
+    const byMe = d.by === this.myPeerId
+
+    if (byMe && !isMe){
+      this.sfx.hitPlayer(0, 1)
+      if (d.dead) this.sfx.kill(0, 1)
+    } else if (isMe){
+      if (d.blocked) this.sfx.hitShield(0, 1)
+      else {
+        this.sfx.hitPlayer(0, 1)
+        if (d.dead) this.sfx.death(0, 1)
+      }
+    } else {
+      const v = this.views[d.target]
+      if (v){
+        const sp = this._spatial(v.sprite.x, v.sprite.y, 0.8)
+        if (d.blocked) this.sfx.hitShield(sp.pan, sp.vol)
+        else this.sfx.hitPlayer(sp.pan, sp.vol)
+        if (d.dead) this.sfx.death(sp.pan, sp.vol)
+      }
+    }
+
+    if (isMe){
       if (d.blocked){
         this.cameras.main.flash(90, 100, 200, 255)
         if (this.localBonuses[3] > 0) this.localBonuses[3]--
@@ -1414,7 +1703,7 @@ class GameScene extends Phaser.Scene {
         this.local.hp = d.hp
         this.local.dead = !!d.dead
         this.cameras.main.flash(90, 255, 30, 100)
-        if (d.dead) this.localBonuses = [0, 0, 0, 0]
+        if (d.dead) this.localBonuses = [0, 0, 0, 0, 0]
       }
     }
     const v = this.views[d.target]
@@ -1426,7 +1715,7 @@ class GameScene extends Phaser.Scene {
         if (v.sprite && v.sprite.active) v.sprite.setTint(colorFromId(d.target))
       })
     }
-    if (d.by === this.myPeerId) this.cameras.main.shake(50, 0.002)
+    if (byMe) this.cameras.main.shake(50, 0.002)
   }
 
   /* =========== VIEWS =========== */
@@ -1483,7 +1772,6 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    /* Периодическая отправка имени хосту */
     if (!this.isHost && time - this._lastNameSent > 5000){
       this._lastNameSent = time
       const hostId = this.currentHostId()
@@ -1520,26 +1808,29 @@ class GameScene extends Phaser.Scene {
       this.simulateHost(time, dt)
     }
 
-    /* Локальное предсказание пуль у клиента */
-    if (!this.isHost && this.firing && time - this._lastLocalShot > CFG.FIRE_CD && !this.local.dead){
-      this._lastLocalShot = time
-      const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
-      const ax = this.aimVec.x / len
-      const ay = this.aimVec.y / len
-      const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
+    /* Локальное предсказание пуль */
+    if (!this.isHost && !this.local.dead){
       const now = performance.now()
-      const hasHoming = this.localBonuses[1] > now
-      const hasRicochet = this.localBonuses[2] > now
-      this.spawnGhostBullet({
-        id,
-        x: this.local.x + ax * (CFG.PLAYER_R + 6),
-        y: this.local.y + ay * (CFG.PLAYER_R + 6),
-        vx: ax * CFG.BULLET_SPEED,
-        vy: ay * CFG.BULLET_SPEED,
-        owner: this.myPeerId,
-        homing: hasHoming,
-        ricochet: hasRicochet ? CFG.BONUS_RICOCHET_MAX : 0,
-      })
+      const behavior = this._computeFireBehavior(this.localBonuses, now)
+      if (this.firing && time - this._lastLocalShot > behavior.fireCd){
+        this._lastLocalShot = time
+        const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
+        const ax = this.aimVec.x / len
+        const ay = this.aimVec.y / len
+        const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
+        this.sfx.shoot(behavior.kind, 0, 1)
+        this.spawnGhostBullet({
+          id,
+          x: this.local.x + ax * (CFG.PLAYER_R + 6),
+          y: this.local.y + ay * (CFG.PLAYER_R + 6),
+          vx: ax * CFG.BULLET_SPEED,
+          vy: ay * CFG.BULLET_SPEED,
+          owner: this.myPeerId,
+          homing: behavior.opts.homing,
+          ricochet: behavior.opts.ricochet,
+          oneshot: behavior.opts.oneshot,
+        })
+      }
     }
 
     this.updateGhostBullets(time, dt)
@@ -1580,6 +1871,7 @@ class GameScene extends Phaser.Scene {
           const sp = SPAWNS[Math.floor(Math.random()*SPAWNS.length)]
           p.x = sp.x; p.y = sp.y; p.hp = CFG.MAX_HP; p.dead = false; p.vx = 0; p.vy = 0
           this.resetBonuses(p)
+          if (id === this.myPeerId) this.sfx.respawn(0, 1)
         } else continue
       }
 
@@ -1594,20 +1886,30 @@ class GameScene extends Phaser.Scene {
       p.aimX = inp.a[0] || 1
       p.aimY = inp.a[1] || 0
 
-      const rapid = (p.bonuses.rapidUntil || 0) > now
-      const homingActive = (p.bonuses.homingUntil || 0) > now
-      const ricochetActive = (p.bonuses.ricochetUntil || 0) > now
-      const fireCd = rapid ? CFG.FIRE_CD * CFG.BONUS_FIRE_MUL : CFG.FIRE_CD
+      /* Единая функция вычисления поведения стрельбы */
+      const bnArr = [
+        p.bonuses.rapidUntil || 0,
+        p.bonuses.homingUntil || 0,
+        p.bonuses.ricochetUntil || 0,
+        p.bonuses.shieldHits || 0,
+        p.bonuses.oneshotUntil || 0,
+      ]
+      const behavior = this._computeFireBehavior(bnArr, now)
 
-      if (inp.f && time - p.fireAt > fireCd){
-        if (!this.ac.validateFire(id, time, fireCd)) continue
+      if (inp.f && time - p.fireAt > behavior.fireCd){
+        if (!this.ac.validateFire(id, time, behavior.fireCd)) continue
         const len = Math.hypot(p.aimX, p.aimY) || 1
         const ax = p.aimX/len, ay = p.aimY/len
         p.fireAt = time
-        this.hostSpawnBullet(id, p.x, p.y, ax, ay, {
-          homing: homingActive,
-          ricochet: ricochetActive ? CFG.BONUS_RICOCHET_MAX : 0,
-        })
+
+        if (id === this.myPeerId){
+          this.sfx.shoot(behavior.kind, 0, 1)
+        } else {
+          const sp = this._spatial(p.x, p.y)
+          this.sfx.shoot(behavior.kind, sp.pan, sp.vol)
+        }
+
+        this.hostSpawnBullet(id, p.x, p.y, ax, ay, behavior.opts)
       }
 
       for (let i = this.pickups.length - 1; i >= 0; i--){
@@ -1668,6 +1970,8 @@ class GameScene extends Phaser.Scene {
       if (hitWall){
         if (b.bouncesLeft > 0){
           b.bouncesLeft--
+          const sp = this._spatial(b.x, b.y, 0.7)
+          this.sfx.ricochetTick(sp.pan, sp.vol)
           const cx = hitWall.x + hitWall.w/2
           const cy = hitWall.y + hitWall.h/2
           const dx = nx - cx, dy = ny - cy
@@ -1709,7 +2013,8 @@ class GameScene extends Phaser.Scene {
             t.bonuses.shieldHits--
             blocked = true
           } else {
-            t.hp -= CFG.DAMAGE
+            const dmg = b.oneshot ? CFG.BONUS_ONESHOT_DAMAGE : CFG.DAMAGE
+            t.hp -= dmg
           }
           let killed = false
           if (!blocked && t.hp <= 0){
@@ -1717,10 +2022,7 @@ class GameScene extends Phaser.Scene {
             killed = true
             this.resetBonuses(t)
             const shooter = this.worldPlayers[b.owner]
-            if (shooter){
-              shooter.score = (shooter.score || 0) + 1
-              DBG.log('SCORE', b.owner.slice(0,8), 'killed', tid.slice(0,8))
-            }
+            if (shooter) shooter.score = (shooter.score || 0) + 1
           }
           const hd = { bid: b.id, target: tid, by: b.owner, hp: t.hp, dead: t.dead, killed, blocked }
           this.sendHit(hd)
@@ -1770,7 +2072,7 @@ class GameScene extends Phaser.Scene {
         for (const id of visible){
           const w = this.worldPlayers[id]
           if (!w) continue
-          const bn = w.bonuses || { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0 }
+          const bn = w.bonuses || { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, oneshotUntil:0 }
           pack[id] = [
             Math.round(w.x), Math.round(w.y),
             Math.round(w.aimX*100)/100, Math.round(w.aimY*100)/100,
@@ -1780,6 +2082,7 @@ class GameScene extends Phaser.Scene {
               Math.max(0, Math.round((bn.homingUntil||0) - now)),
               Math.max(0, Math.round((bn.ricochetUntil||0) - now)),
               bn.shieldHits || 0,
+              Math.max(0, Math.round((bn.oneshotUntil||0) - now)),
             ],
           ]
         }
@@ -1803,22 +2106,21 @@ class GameScene extends Phaser.Scene {
       owner: ownerId, born: this.time.now,
       homing: !!opts.homing,
       bouncesLeft: opts.ricochet || 0,
+      oneshot: !!opts.oneshot,
     }
     this.bullets.push(b)
     const payload = {
       id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, owner: ownerId,
-      homing: b.homing, ricochet: b.bouncesLeft,
+      homing: b.homing, ricochet: b.bouncesLeft, oneshot: b.oneshot,
     }
     this.sendBullet(payload)
     this.spawnGhostBullet(payload)
   }
 
-  /* 🎯 Обновлённый метод: homing теперь работает и на клиенте */
   updateGhostBullets(time, dt){
     for (const id in this.ghostBullets){
       const g = this.ghostBullets[id]
 
-      /* Самонаведение — гнёт пулю к ближайшему врагу */
       if (g.homing){
         let nearest = null, nd = Infinity
         for (const vid in this.views){
@@ -1860,6 +2162,8 @@ class GameScene extends Phaser.Scene {
       if (hitWall){
         if (g.bouncesLeft > 0){
           g.bouncesLeft--
+          const sp = this._spatial(g.sprite.x, g.sprite.y, 0.6)
+          this.sfx.ricochetTick(sp.pan, sp.vol)
           const cx = hitWall.x + hitWall.w/2
           const cy = hitWall.y + hitWall.h/2
           const dx = nx - cx, dy = ny - cy
@@ -1982,10 +2286,7 @@ class GameScene extends Phaser.Scene {
     if (this.isHost){
       const p = this.ac.peers.get(id)
       for (const peerId of this.peers){
-        this.sendBan({
-          id, reason,
-          pubHash: persistent ? (p?.pubHash || null) : null,
-        }, peerId)
+        this.sendBan({ id, reason, pubHash: persistent ? (p?.pubHash || null) : null }, peerId)
       }
     }
     this.updateStatus()
@@ -1993,22 +2294,24 @@ class GameScene extends Phaser.Scene {
 }
 
 /* ============================================================
-   10. СТАРТ
+   11. СТАРТ
    ============================================================ */
 ;(async ()=>{
-  DBG.log('BOOT', 'starting...')
   const identity = new Identity()
   await identity.init()
   document.getElementById('pid').textContent =
     `identity: ${identity.mode} · id: ${identity.pubHash}`
-  DBG.log('BOOT', 'identity ready:', identity.mode)
+
+  const sfx = new SoundEngine()
 
   document.getElementById('playBtn').addEventListener('click', ()=>{
     const code = (document.getElementById('roomInput').value || 'arena1').trim()
     const rawName = (document.getElementById('nameInput').value || '').trim()
     const name = cleanName(rawName) || ('Player' + Math.floor(Math.random()*999))
-    DBG.log('BOOT', 'starting with room:', JSON.stringify(code), 'name:', name)
     document.getElementById('menu').style.display = 'none'
+
+    sfx.init()
+    sfx.startAmbient()
 
     new Phaser.Game({
       type: Phaser.AUTO,
@@ -2023,6 +2326,7 @@ class GameScene extends Phaser.Scene {
           game.registry.set('roomId', code)
           game.registry.set('identity', identity)
           game.registry.set('playerName', name)
+          game.registry.set('sfx', sfx)
         }
       },
     })
