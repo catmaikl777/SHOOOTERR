@@ -7,7 +7,6 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Shoot'n'cats</title>
 <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
-
 <style>
   html,body{margin:0;padding:0;height:100%;background:#05070d;overflow:hidden;
             touch-action:none;-webkit-user-select:none;user-select:none;
@@ -22,6 +21,11 @@
           color:#8b949e;font:clamp(11px,1.8vmin,16px) monospace;z-index:6;
           text-align:center;pointer-events:none;white-space:pre;padding:4px 10px;
           background:rgba(5,7,13,.6);border-radius:6px;}
+  #bonuses{position:fixed;top:52px;left:50%;transform:translateX(-50%);
+           color:#ffe066;font:clamp(11px,1.8vmin,15px) monospace;z-index:6;
+           text-align:center;pointer-events:none;white-space:pre;
+           background:rgba(5,7,13,.6);padding:4px 10px;border-radius:6px;
+           display:none;}
   #scores{position:fixed;top:52px;left:12px;color:#e6edf3;
           font:clamp(11px,1.8vmin,16px) monospace;
           z-index:6;pointer-events:none;white-space:pre;line-height:1.6;
@@ -64,6 +68,7 @@
 <div id="game"></div>
 <div id="ui"><div id="joyL"></div><div id="joyR"></div></div>
 <div id="status"></div>
+<div id="bonuses"></div>
 <div id="scores"></div>
 <div id="voteInfo"></div>
 <div id="ac"></div>
@@ -77,7 +82,7 @@
   <div id="hint">
     Левый стик — движение<br>
     Правый стик — прицел и огонь<br>
-    Если ты тюлень то тебе сюда
+    Ловит ящики: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит
   </div>
   <div id="pid">…generating identity…</div>
 </div>
@@ -105,6 +110,17 @@ const CFG = {
 
   WALL_GLOW:  true,
   FLOOR_GLOW: true,
+
+  /* 🎁 Бонусы */
+  PICKUP_INTERVAL:   5000,
+  PICKUP_MAX:        6,
+  PICKUP_RADIUS:     24,
+  BONUS_DURATION:    20000,
+  BONUS_HP_AMOUNT:   40,
+  BONUS_FIRE_MUL:    0.5,
+  BONUS_HOMING_TURN: 0.12,
+  BONUS_HOMING_NOISE: 0.4,
+  BONUS_RICOCHET_MAX: 2,
 }
 
 const AC_CFG = {
@@ -122,8 +138,6 @@ const AC_CFG = {
 
 const APP_ID = 'p2p-shooter-identity-v1'
 const VOTE_DURATION_MS = 20000
-
-/* 👇 URL твоего WebSocket-сервера */
 const RELAY_URL = 'wss://shoooterr.relaxdev.ru'
 
 /* ============================================================
@@ -161,7 +175,6 @@ function colorFromId(id){const h=hashStr(id||'x')%360;return Phaser.Display.Colo
 function clamp(v,a,b){return v<a?a:v>b?b:v}
 function fnv1a(str){let h=2166136261>>>0;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)}return(h>>>0).toString(36)}
 function randomToken(len=24){const b=new Uint8Array(len);crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,'0')).join('')}
-function safePeerId(s){ return String(s).replace(/[^A-Za-z0-9_-]/g,'_').slice(0,60) }
 function cleanName(s){ return String(s||'').replace(/[<>&"']/g,'').trim().slice(0,14) }
 
 function resolveCircleRect(px,py,r,rect){
@@ -204,39 +217,27 @@ function lineOfSight(x1,y1,x2,y2,walls){
    ============================================================ */
 class Identity {
   constructor(){
-    this.ready=false
-    this.mode='none'
-    this.pubHash=null
-    this.keyPair=null
-    this.pubJwk=null
+    this.ready=false; this.mode='none'; this.pubHash=null
+    this.keyPair=null; this.pubJwk=null
   }
 
   async init(){
     if (!(window.isSecureContext && window.crypto && crypto.subtle)) {
       let stored = localStorage.getItem('p2p_fallback_id')
-      if (!stored) {
-        stored = randomToken(12)
-        localStorage.setItem('p2p_fallback_id', stored)
-      }
-      this.pubHash = 'fb_' + stored
-      this.mode = 'fallback'
-      this.ready = true
+      if (!stored){ stored = randomToken(12); localStorage.setItem('p2p_fallback_id', stored) }
+      this.pubHash = 'fb_' + stored; this.mode = 'fallback'; this.ready = true
       DBG.log('ID', 'fallback mode', this.pubHash)
       return
     }
-
     const storeKey = 'p2p_ecdsa_key'
     let stored = null
     try { stored = JSON.parse(localStorage.getItem(storeKey)) } catch {}
-
     try {
       if (stored && stored.priv && stored.pub) {
         this.keyPair = {
-          privateKey: await crypto.subtle.importKey(
-            'jwk', stored.priv,
+          privateKey: await crypto.subtle.importKey('jwk', stored.priv,
             {name:'ECDSA', namedCurve:'P-256'}, true, ['sign']),
-          publicKey: await crypto.subtle.importKey(
-            'jwk', stored.pub,
+          publicKey: await crypto.subtle.importKey('jwk', stored.pub,
             {name:'ECDSA', namedCurve:'P-256'}, true, ['verify']),
         }
         this.pubJwk = stored.pub
@@ -248,17 +249,12 @@ class Identity {
         localStorage.setItem(storeKey, JSON.stringify({priv: privJwk, pub: this.pubJwk}))
       }
       const hex = await this._sha256hex(JSON.stringify(this.pubJwk))
-      this.pubHash = hex.slice(0,16)
-      this.mode = 'crypto'
-      this.ready = true
+      this.pubHash = hex.slice(0,16); this.mode = 'crypto'; this.ready = true
       DBG.log('ID', 'crypto mode ready', this.pubHash)
     } catch (e) {
-      DBG.warn('ID', 'crypto failed, fallback', e)
       let stored2 = localStorage.getItem('p2p_fallback_id') || randomToken(12)
       localStorage.setItem('p2p_fallback_id', stored2)
-      this.pubHash = 'fb_' + stored2
-      this.mode = 'fallback'
-      this.ready = true
+      this.pubHash = 'fb_' + stored2; this.mode = 'fallback'; this.ready = true
     }
   }
 
@@ -269,26 +265,21 @@ class Identity {
   }
 
   async sign(str){
-    if (this.mode !== 'crypto') return 'no-crypto'
-    if (!crypto?.subtle) return 'no-crypto'
+    if (this.mode !== 'crypto' || !crypto?.subtle) return 'no-crypto'
     const buf = new TextEncoder().encode(str)
-    const sig = await crypto.subtle.sign(
-      {name:'ECDSA', hash:'SHA-256'}, this.keyPair.privateKey, buf)
+    const sig = await crypto.subtle.sign({name:'ECDSA', hash:'SHA-256'}, this.keyPair.privateKey, buf)
     return btoa(String.fromCharCode(...new Uint8Array(sig)))
   }
 
   async verify(pubJwk, str, sigB64){
-    if (this.mode !== 'crypto') return false
-    if (!crypto?.subtle) return false
+    if (this.mode !== 'crypto' || !crypto?.subtle) return false
     if (!pubJwk || !sigB64) return false
     try {
-      const pub = await crypto.subtle.importKey(
-        'jwk', pubJwk,
+      const pub = await crypto.subtle.importKey('jwk', pubJwk,
         {name:'ECDSA', namedCurve:'P-256'}, true, ['verify'])
       const buf = new TextEncoder().encode(str)
       const sig = Uint8Array.from(atob(sigB64), c => c.charCodeAt(0))
-      return await crypto.subtle.verify(
-        {name:'ECDSA', hash:'SHA-256'}, pub, sig, buf)
+      return await crypto.subtle.verify({name:'ECDSA', hash:'SHA-256'}, pub, sig, buf)
     } catch { return false }
   }
 }
@@ -317,7 +308,6 @@ class AntiCheat {
     this.identity = null
     this.loadPersistentBans()
   }
-
   loadPersistentBans(){
     try {
       const raw = localStorage.getItem('p2p_bans_' + APP_ID)
@@ -328,9 +318,7 @@ class AntiCheat {
     } catch {}
   }
   savePersistentBans(){
-    try {
-      localStorage.setItem('p2p_bans_' + APP_ID, JSON.stringify([...this.persistentBans]))
-    } catch {}
+    try { localStorage.setItem('p2p_bans_' + APP_ID, JSON.stringify([...this.persistentBans])) } catch {}
   }
   isPersistentlyBanned(pubHash){ return !!(pubHash && this.persistentBans.has(pubHash)) }
   addPersistentBan(pubHash){ if (!pubHash) return; this.persistentBans.add(pubHash); this.savePersistentBans() }
@@ -339,8 +327,7 @@ class AntiCheat {
     let p = this.peers.get(id)
     if (!p) {
       p = {
-        strikes:0, lastStrike:0, suspicion:0,
-        lastUpdate:performance.now(),
+        strikes:0, lastStrike:0, suspicion:0, lastUpdate:performance.now(),
         inputTimes:[], lastSeq:-1, token:null, sigRequiredAt:0,
         lastFire:0, shotsFired:0, shotsHit:0,
         aimHistory:[], lastPos:null, lastPosT:0, rtt:0,
@@ -355,8 +342,7 @@ class AntiCheat {
 
   strike(id, reason, w=1){
     const p = this.ensure(id)
-    p.strikes += w
-    p.lastStrike = performance.now()
+    p.strikes += w; p.lastStrike = performance.now()
     acLog(`⚡ ${id.slice(0,6)} ${reason} (${p.strikes}/${AC_CFG.STRIKE_KICK})`)
     if (p.strikes >= AC_CFG.STRIKE_KICK) { this.ban(id, reason); return false }
     return true
@@ -365,20 +351,14 @@ class AntiCheat {
     if (this.bans.has(id)) return
     this.bans.add(id)
     const p = this.peers.get(id)
-    if (persistent && p && p.pubHash) {
-      this.addPersistentBan(p.pubHash)
-      acLog(`⛔ PERMABAN ${p.pubHash.slice(0,6)}: ${reason}`)
-    } else {
-      acLog(`⛔ BAN ${id.slice(0,6)}: ${reason}`)
-    }
+    if (persistent && p && p.pubHash) this.addPersistentBan(p.pubHash)
+    acLog(`⛔ BAN ${id.slice(0,6)}: ${reason}`)
     this.scene.onAntiCheatBan?.(id, reason, persistent)
   }
   decay(id, dtSec){
     const p = this.peers.get(id); if (!p) return
     const now = performance.now()
-    if (p.strikes > 0 && now - p.lastStrike > AC_CFG.STRIKE_DECAY_MS) {
-      p.strikes--; p.lastStrike = now
-    }
+    if (p.strikes > 0 && now - p.lastStrike > AC_CFG.STRIKE_DECAY_MS){ p.strikes--; p.lastStrike = now }
     if (p.suspicion > 0) p.suspicion = Math.max(0, p.suspicion - AC_CFG.SUSPICION_DECAY * dtSec)
   }
 
@@ -408,7 +388,7 @@ class AntiCheat {
 
     let size = 0
     try { size = JSON.stringify(data).length } catch { return this.strike(id,'unserializable',AC_CFG.STRIKE_SEVERE) }
-    if (size > AC_CFG.MAX_PACKET_BYTES) return this.strike(id, `oversized ${size}B`, AC_CFG.STRIKE_SEVERE)
+    if (size > AC_CFG.MAX_PACKET_BYTES) return this.strike(id, `oversized`, AC_CFG.STRIKE_SEVERE)
 
     if (!data || typeof data !== 'object') return this.strike(id, 'not object', AC_CFG.STRIKE_SEVERE)
     if (!this.pair(data.m) || !this.pair(data.a)) return this.strike(id, 'bad vectors', AC_CFG.STRIKE_SEVERE)
@@ -418,12 +398,12 @@ class AntiCheat {
     p.inputTimes.push(now)
     while (p.inputTimes.length && now - p.inputTimes[0] > 1000) p.inputTimes.shift()
     if (p.inputTimes.length > AC_CFG.MAX_INPUT_HZ)
-      return this.strike(id, `flood ${p.inputTimes.length}/s`, AC_CFG.STRIKE_SEVERE)
+      return this.strike(id, `flood`, AC_CFG.STRIKE_SEVERE)
 
     if (data.seq <= p.lastSeq)
-      return this.strike(id, `replay seq ${data.seq}<=${p.lastSeq}`, AC_CFG.STRIKE_SEVERE)
+      return this.strike(id, `replay`, AC_CFG.STRIKE_SEVERE)
     if (p.lastSeq >= 0 && data.seq > p.lastSeq + AC_CFG.MAX_SEQ_GAP)
-      return this.strike(id, `seq jump ${data.seq - p.lastSeq}`, 1)
+      return this.strike(id, `seq jump`, 1)
     p.lastSeq = data.seq
 
     if (p.token && now > p.sigRequiredAt && !this.verify(id, data))
@@ -450,12 +430,12 @@ class AntiCheat {
     const dx = next.x - prev.x, dy = next.y - prev.y
     const dist = Math.hypot(dx, dy)
     if (dist > AC_CFG.TELEPORT_HARD) {
-      this.strike(id, `teleport ${dist.toFixed(0)}px`, AC_CFG.STRIKE_SEVERE)
+      this.strike(id, `teleport`, AC_CFG.STRIKE_SEVERE)
       return { x: prev.x, y: prev.y }
     }
     const maxD = CFG.SPEED * dt * AC_CFG.SPEED_TOLERANCE + 8
     if (dist > maxD) {
-      this.strike(id, `speed ${dist.toFixed(0)}>${maxD.toFixed(0)}`, 1)
+      this.strike(id, `speed`, 1)
       const k = maxD / dist
       return { x: prev.x + dx*k, y: prev.y + dy*k }
     }
@@ -466,7 +446,7 @@ class AntiCheat {
     const p = this.ensure(id)
     const min = fireCd * AC_CFG.FIRE_TOLERANCE
     if (now - p.lastFire < min)
-      return this.strike(id, `rapid fire ${(now - p.lastFire).toFixed(0)}ms`, 1)
+      return this.strike(id, `rapid fire`, 1)
     p.lastFire = now
     return true
   }
@@ -483,9 +463,7 @@ class AntiCheat {
       }
     }
     p.aimHistory.push({ ax, ay, t: now })
-    while (p.aimHistory.length && now - p.aimHistory[0].t > AC_CFG.AIM_HISTORY_MS) {
-      p.aimHistory.shift()
-    }
+    while (p.aimHistory.length && now - p.aimHistory[0].t > AC_CFG.AIM_HISTORY_MS) p.aimHistory.shift()
   }
 
   recordShot(id, hit){
@@ -536,14 +514,8 @@ class AntiCheat {
       this.decay(id, dtSec)
       const idle = now - p.lastUpdate
       if (idle > AC_CFG.PEER_TIMEOUT_MS){
-        if (!p._idleLogged){
-          p._idleLogged = true
-          acLog(`⏸ ${id.slice(0,6)} idle ${(idle/1000).toFixed(0)}s`)
-        }
-      } else if (p._idleLogged){
-        p._idleLogged = false
-        acLog(`▶ ${id.slice(0,6)} resumed`)
-      }
+        if (!p._idleLogged){ p._idleLogged = true; acLog(`⏸ ${id.slice(0,6)} idle`) }
+      } else if (p._idleLogged){ p._idleLogged = false; acLog(`▶ ${id.slice(0,6)} resumed`) }
     }
   }
 }
@@ -555,12 +527,9 @@ function hostSimulateShot(ac, shooterId, shooterPos, aim, targets, walls){
   const { x, y } = shooterPos
   const len = Math.hypot(aim[0], aim[1]) || 1
   const ax = aim[0]/len, ay = aim[1]/len
-
   ac.recordAim(shooterId, ax, ay, performance.now())
-
   const p = ac.ensure(shooterId)
   const rewindMs = Math.min(p.rtt, AC_CFG.MAX_REWIND_MS)
-
   let bestHit = null, bestDist = Infinity
   for (const tid in targets){
     if (tid === shooterId) continue
@@ -618,41 +587,26 @@ function generateWalls(seedStr){
    ============================================================ */
 class BootScene extends Phaser.Scene {
   constructor(){ super('Boot') }
-
   preload(){
     this.load.image('player', 'player.png')
     this.load.image('bullet', 'bullet.png')
     this.load.image('wall',   'wall.png')
     this.load.image('floor',  'floor.png')
-
     this.load.on('loaderror', file => {
       DBG.warn('BOOT', 'not found, generating stub:', file.key)
       this.generateStub(file.key)
     })
   }
-
   generateStub(key){
     if (this.textures.exists(key)) return
     const g = this.make.graphics({x:0,y:0,add:false})
-    if (key === 'player'){
-      g.fillStyle(0xffffff,1); g.fillCircle(24,24,18); g.fillRect(38,18,18,12)
-      g.generateTexture('player',56,48)
-    } else if (key === 'bullet'){
-      g.fillStyle(0xffe066,1); g.fillCircle(6,6,5)
-      g.generateTexture('bullet',12,12)
-    } else if (key === 'wall'){
-      g.fillStyle(0xffffff,1); g.fillRect(0,0,40,40)
-      g.generateTexture('wall',40,40)
-    } else if (key === 'floor'){
-      g.fillStyle(0xffffff,1); g.fillRect(0,0,80,80)
-      g.generateTexture('floor',80,80)
-    }
+    if (key === 'player'){ g.fillStyle(0xffffff,1); g.fillCircle(24,24,18); g.fillRect(38,18,18,12); g.generateTexture('player',56,48) }
+    else if (key === 'bullet'){ g.fillStyle(0xffe066,1); g.fillCircle(6,6,5); g.generateTexture('bullet',12,12) }
+    else if (key === 'wall'){ g.fillStyle(0xffffff,1); g.fillRect(0,0,40,40); g.generateTexture('wall',40,40) }
+    else if (key === 'floor'){ g.fillStyle(0xffffff,1); g.fillRect(0,0,80,80); g.generateTexture('floor',80,80) }
     g.destroy()
   }
-
-  create(){
-    this.scene.start('Game')
-  }
+  create(){ this.scene.start('Game') }
 }
 
 /* ============================================================
@@ -668,51 +622,37 @@ class GameScene extends Phaser.Scene {
 
     DBG.log('GAME', 'scene created', { roomId: this.roomId, name: this.myName })
 
-    /* ---------- ПОЛ ---------- */
+    /* Пол */
     this.floorSprite = this.add.tileSprite(0, 0, CFG.W, CFG.H, 'floor')
-      .setOrigin(0)
-      .setDepth(-20)
-      .setTint(CFG.FLOOR_COLOR)
-      .setAlpha(CFG.FLOOR_TINT_ALPHA)
-
+      .setOrigin(0).setDepth(-20).setTint(CFG.FLOOR_COLOR).setAlpha(CFG.FLOOR_TINT_ALPHA)
     if (CFG.FLOOR_GLOW){
       this.add.rectangle(CFG.W/2, CFG.H/2, CFG.W, CFG.H, CFG.FLOOR_COLOR, 0.12)
-        .setBlendMode(Phaser.BlendModes.ADD)
-        .setDepth(-19)
+        .setBlendMode(Phaser.BlendModes.ADD).setDepth(-19)
     }
 
-    /* ---------- СТЕНЫ ---------- */
+    /* Стены */
     this.wallRects = generateWalls(this.roomId)
     this.wallSprites = []
-
     if (CFG.WALL_GLOW){
       for (const r of this.wallRects){
         this.add.image(r.x + r.w/2, r.y + r.h/2, 'wall')
-          .setDisplaySize(r.w + 14, r.h + 14)
-          .setTintFill(CFG.WALL_COLOR)
-          .setAlpha(0.3)
-          .setBlendMode(Phaser.BlendModes.ADD)
-          .setDepth(-11)
+          .setDisplaySize(r.w + 14, r.h + 14).setTintFill(CFG.WALL_COLOR)
+          .setAlpha(0.3).setBlendMode(Phaser.BlendModes.ADD).setDepth(-11)
       }
     }
-
     for (const r of this.wallRects){
       const wall = this.add.image(r.x, r.y, 'wall')
-        .setOrigin(0)
-        .setDepth(-10)
-        .setDisplaySize(r.w, r.h)
-        .setTintFill(CFG.WALL_COLOR)
+        .setOrigin(0).setDepth(-10).setDisplaySize(r.w, r.h).setTintFill(CFG.WALL_COLOR)
       this.wallSprites.push(wall)
     }
 
-    /* ---------- КАМЕРА ---------- */
+    /* Камера */
     this.cameras.main.setBounds(0, 0, CFG.W, CFG.H)
     this.cameras.main.setBackgroundColor('#05070d')
-
     this.updateCameraZoom()
     this.scale.on('resize', () => this.updateCameraZoom())
 
-    /* ---------- СОСТОЯНИЕ ---------- */
+    /* Состояние */
     this.views = {}
     this.ghostBullets = {}
     this.inputs = {}
@@ -728,8 +668,18 @@ class GameScene extends Phaser.Scene {
     this.scores = {}
     this.peerNames = {}
     this._lastLocalShot = 0
+    this._lastNameSent = 0
 
-    /* голосование */
+    /* 🎁 Ящики с бонусами */
+    this.pickups = []
+    this.pickupSprites = {}
+    this.pickupSeq = 0
+    this.lastPickupSpawn = 0
+
+    /* 🎁 Локальные бонусы: [rapidUntil, homingUntil, ricochetUntil, shieldHits] */
+    this.localBonuses = [0, 0, 0, 0]
+
+    /* Голосование */
     this.hostBlacklist = new Set()
     this.votes = new Map()
     this.voteActive = false
@@ -745,16 +695,17 @@ class GameScene extends Phaser.Scene {
     this.serverHostId = null
     this.reconnectAttempts = 0
 
-    /* локальное состояние */
+    /* Локальное состояние */
     this.local = { x:SPAWNS[0].x, y:SPAWNS[0].y, aimX:1, aimY:0, hp:CFG.MAX_HP, dead:false, score:0 }
     this.predicted = { x:this.local.x, y:this.local.y }
 
-    /* античит + identity */
+    /* Античит + identity */
     this.ac = new AntiCheat(this)
     this.ac.identity = this.identity
 
     /* HUD */
     this.statusEl = document.getElementById('status')
+    this.bonusesEl = document.getElementById('bonuses')
     this.scoresEl = document.getElementById('scores')
     this.voteBtn  = document.getElementById('voteBtn')
     this.voteInfo = document.getElementById('voteInfo')
@@ -780,7 +731,7 @@ class GameScene extends Phaser.Scene {
     const worldView = shortSide < 600 ? 450 : 700
     const zoom = clamp(shortSide / worldView, 0.9, 2.5)
     this.cameras.main.setZoom(zoom)
-    DBG.log('CAM', 'viewport:', w + '×' + h, 'shortSide:', shortSide, 'zoom:', zoom.toFixed(2))
+    DBG.log('CAM', 'viewport:', w + '×' + h, 'zoom:', zoom.toFixed(2))
   }
 
   /* =========== INPUT =========== */
@@ -790,9 +741,8 @@ class GameScene extends Phaser.Scene {
     this.firing = false
 
     const joyL = nipplejs.create({
-      zone: document.getElementById('joyL'),
-      mode:'static', position:{left:'50%',top:'50%'},
-      color:'#1133ff', size:110, threshold:0.1,
+      zone: document.getElementById('joyL'), mode:'static',
+      position:{left:'50%',top:'50%'}, color:'#1133ff', size:110, threshold:0.1,
     })
     joyL.on('move', (e,d)=>{
       const f = Math.min(d.force,1)
@@ -802,9 +752,8 @@ class GameScene extends Phaser.Scene {
     joyL.on('end', ()=>{ this.moveVec.x=0; this.moveVec.y=0 })
 
     const joyR = nipplejs.create({
-      zone: document.getElementById('joyR'),
-      mode:'static', position:{left:'50%',top:'50%'},
-      color:'#ff2266', size:110, threshold:0.1,
+      zone: document.getElementById('joyR'), mode:'static',
+      position:{left:'50%',top:'50%'}, color:'#ff2266', size:110, threshold:0.1,
     })
     joyR.on('start', ()=>{ this.firing = true })
     joyR.on('move', (e,d)=>{
@@ -820,9 +769,7 @@ class GameScene extends Phaser.Scene {
      NETWORK
      ============================================================ */
   setupNetwork(){
-    DBG.log('NET', 'connecting to relay...')
-    DBG.log('NET', 'URL:', RELAY_URL)
-    DBG.log('NET', 'room:', this.roomId)
+    DBG.log('NET', 'connecting...')
 
     this.handlers = {
       in:   (d, id) => this.onNetInput(d, id),
@@ -845,21 +792,14 @@ class GameScene extends Phaser.Scene {
         `DIAG 30s: peers=${n} role=${this.isHost?'HOST':(this.hasBecomeClient?'CLIENT':'WAIT')}`,
         ok ? '#3fb950' : '#f85149'
       )
-      DBG.log('DIAG', 'myPeerId   :', this.myPeerId)
-      DBG.log('DIAG', 'myName     :', this.myName)
-      DBG.log('DIAG', 'serverHost :', this.serverHostId)
-      DBG.log('DIAG', 'ws state   :', this.ws ? this.ws.readyState : 'no ws')
-      DBG.log('DIAG', 'peers      :', [...this.peers])
+      DBG.log('DIAG', 'myPeerId:', this.myPeerId, 'host:', this.serverHostId)
+      DBG.log('DIAG', 'peers:', [...this.peers])
     }, 30000)
   }
 
   connectToRelay(){
-    try {
-      this.ws = new WebSocket(RELAY_URL)
-    } catch(e){
-      DBG.err('NET', 'WebSocket constructor failed:', e)
-      return
-    }
+    try { this.ws = new WebSocket(RELAY_URL) }
+    catch(e){ DBG.err('NET', 'ws fail', e); return }
 
     this.ws.onopen = () => {
       DBG.log('NET', '*** WS CONNECTED ***')
@@ -871,70 +811,48 @@ class GameScene extends Phaser.Scene {
     this.ws.onmessage = ev => {
       let msg
       try { msg = JSON.parse(ev.data) } catch { return }
-
       DBG.log('NET', '📩 recv:', msg.type || msg.a)
-
       const { type } = msg
 
       if (type === 'banned'){
-        DBG.err('NET', '🚫 SERVER BANNED YOU:', msg.reason)
-        DBG.banner('BANNED: ' + msg.reason, '#f85149')
+        DBG.err('NET', '🚫 BANNED:', msg.reason)
         try { this.ws.close() } catch {}
         alert('Вас забанил сервер античита: ' + msg.reason)
         return
       }
-      if (type === 'error'){
-        DBG.warn('NET', 'server error:', msg.msg)
-        return
-      }
+      if (type === 'error'){ DBG.warn('NET', 'err:', msg.msg); return }
 
       if (type === 'welcome'){
         this.serverHostId = msg.host
-        DBG.log('NET', '*** WELCOMED ***', msg.peerId, 'host:', msg.host, 'peers:', msg.peers)
-        DBG.banner('YOU ARE: ' + msg.peerId, '#2f81f7')
-
+        DBG.log('NET', 'WELCOMED', msg.peerId, 'host:', msg.host, 'peers:', msg.peers)
         this.migrateMyId(msg.peerId)
-
         const iAmHost = (msg.host === msg.peerId)
 
         if (iAmHost){
-          DBG.log('NET', 'I AM HOST (server assigned)')
+          DBG.log('NET', 'I AM HOST')
           this.isHost = true
           this.hasBecomeClient = false
           this.peerNames[this.myPeerId] = this.myName
-          this.sendId({
-            pubHash: this.identity.pubHash,
-            mode: this.identity.mode,
-            name: this.myName,
-          }, this.myPeerId)
+          this.sendId({ pubHash:this.identity.pubHash, mode:this.identity.mode, name:this.myName }, this.myPeerId)
           this.becomeHost()
           DBG.banner('YOU ARE HOST', '#ff2266')
         } else {
           DBG.log('NET', 'I AM CLIENT, host =', msg.host)
           this.isHost = false
           this.hasBecomeClient = true
-
           for (const peerId of msg.peers){
             if (peerId === this.myPeerId) continue
             this.peers.add(peerId)
             if (!this.views[peerId]) this.createView(peerId)
             this.ac.ensure(peerId)
-            DBG.log('NET', 'added existing peer:', peerId)
           }
-
           this.peerNames[this.myPeerId] = this.myName
-
           if (msg.host){
-            this.sendId({
-              pubHash: this.identity.pubHash,
-              mode: this.identity.mode,
-              name: this.myName,
-            }, msg.host)
-            this.sendTok({ request: true }, msg.host)
-            this.sendId({ challenge: 'hello-from-' + this.myPeerId }, msg.host)
+            this.sendId({ pubHash:this.identity.pubHash, mode:this.identity.mode, name:this.myName }, msg.host)
+            this.sendTok({ request:true }, msg.host)
+            this.sendId({ challenge:'hello-from-' + this.myPeerId }, msg.host)
           }
         }
-
         this.updateStatus()
         return
       }
@@ -944,12 +862,10 @@ class GameScene extends Phaser.Scene {
         this.peers.add(msg.peerId)
         if (!this.views[msg.peerId]) this.createView(msg.peerId)
         this.ac.ensure(msg.peerId)
-
         if (this.isHost){
           this.addPlayerToWorld(msg.peerId)
           const p = this.ac.ensure(msg.peerId)
           p.nonce = randomToken(12)
-          p.nonceSentAt = performance.now()
           this.sendId({ challenge: p.nonce }, msg.peerId)
           this.sendTok({ token: this.ac.issueToken(msg.peerId) }, msg.peerId)
         }
@@ -970,10 +886,9 @@ class GameScene extends Phaser.Scene {
       }
 
       if (type === 'host-change'){
-        DBG.log('NET', '*** HOST CHANGED *** →', msg.host)
+        DBG.log('NET', 'HOST CHANGED →', msg.host)
         this.serverHostId = msg.host
         if (msg.host === this.myPeerId){
-          DBG.log('NET', 'I am new host')
           this.isHost = true
           this.hasBecomeClient = false
           this.becomeHost()
@@ -993,15 +908,13 @@ class GameScene extends Phaser.Scene {
       if (h) h(data, fromId)
     }
 
-    this.ws.onerror = err => DBG.err('NET', 'WS error:', err)
-
+    this.ws.onerror = err => DBG.err('NET', 'ws err', err)
     this.ws.onclose = ev => {
-      DBG.warn('NET', 'WS closed, code:', ev.code)
+      DBG.warn('NET', 'ws closed', ev.code)
       if (this.reconnectAttempts < 30){
         this.reconnectAttempts++
         const delay = Math.min(2000 * this.reconnectAttempts, 10000)
-        DBG.log('NET', `reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`)
-        setTimeout(()=> this.connectToRelay(), delay)
+        setTimeout(() => this.connectToRelay(), delay)
       }
     }
   }
@@ -1010,27 +923,14 @@ class GameScene extends Phaser.Scene {
     const oldId = this.myPeerId
     if (oldId === newId) return
     DBG.log('NET', 'my id:', oldId?.slice(0,12) || '?', '→', newId.slice(0,12))
-
     const v = this.views[oldId]
-    if (v){
-      this.views[newId] = v
-      delete this.views[oldId]
-      DBG.log('NET', 'view migrated:', oldId?.slice(0,12), '→', newId.slice(0,12))
-    } else {
-      DBG.warn('NET', 'no view found for old id', oldId)
-    }
-
-    if (this.peerNames[oldId]){
-      this.peerNames[newId] = this.peerNames[oldId]
-      delete this.peerNames[oldId]
-    }
+    if (v){ this.views[newId] = v; delete this.views[oldId] }
+    if (this.peerNames[oldId]){ this.peerNames[newId] = this.peerNames[oldId]; delete this.peerNames[oldId] }
     this.peerNames[newId] = this.myName
-
     this.myPeerId = newId
     this.updateStatus()
   }
 
-  /* =========== SEND =========== */
   sendTo(action, data, peerId){
     if (!this.ws || this.ws.readyState !== 1) return
     this.ws.send(JSON.stringify({ to: peerId, data: { a: action, d: data } }))
@@ -1049,9 +949,8 @@ class GameScene extends Phaser.Scene {
   sendPing   (d, id) { this.sendTo('png', d, id) }
   sendId     (d, id) { this.sendTo('id', d, id) }
   sendVote   (d){
-    if (this.isHost){
-      this.broadcast('vote', d)
-    } else {
+    if (this.isHost){ this.broadcast('vote', d) }
+    else {
       const hostId = this.currentHostId()
       if (hostId && hostId !== this.myPeerId) this.sendTo('vote', d, hostId)
     }
@@ -1069,23 +968,17 @@ class GameScene extends Phaser.Scene {
     if (this.isHost) return
     this.applyState(data)
   }
-  /* 🆕 ФИКС двойной струи: если пуля наша и есть свежая локальная — пропускаем */
   onNetBullet(data){
     if (this.isHost) return
-
     if (data.owner === this.myPeerId){
       const prefix = 'local_' + this.myPeerId + '_'
       const now = performance.now()
-      let hasFreshLocal = false
+      let fresh = false
       for (const k in this.ghostBullets){
-        if (k.startsWith(prefix) && now - this.ghostBullets[k].born < 300){
-          hasFreshLocal = true
-          break
-        }
+        if (k.startsWith(prefix) && now - this.ghostBullets[k].born < 300){ fresh = true; break }
       }
-      if (hasFreshLocal) return
+      if (fresh) return
     }
-
     this.spawnGhostBullet(data)
   }
   onNetHit(data){
@@ -1100,7 +993,6 @@ class GameScene extends Phaser.Scene {
       }
     } else if (data.token){
       this.ac.setMyToken(data.token)
-      DBG.log('ID', 'token received from host')
     }
   }
   onNetBan(data){
@@ -1121,7 +1013,6 @@ class GameScene extends Phaser.Scene {
     if (data.pong){
       p.rtt = performance.now() - data.t
       p.lastUpdate = performance.now()
-      DBG.log('PING', 'pong from', fromId.slice(0,8), 'rtt:', Math.round(p.rtt))
     } else {
       this.sendPing({ t: data.t, pong: 1 }, fromId)
     }
@@ -1137,7 +1028,6 @@ class GameScene extends Phaser.Scene {
         this.renderScores()
       }
     }
-
     if (data.challenge){
       const sig = await this.identity.sign(data.challenge)
       this.sendId({
@@ -1156,10 +1046,7 @@ class GameScene extends Phaser.Scene {
         const ok = await this.identity.verify(data.pubJwk, p.nonce || '', data.sig)
         p.verified = ok
       }
-      if (this.ac.isPersistentlyBanned(data.pubHash)){
-        this.ac.ban(fromId, 'persistent ban', false)
-        return
-      }
+      if (this.ac.isPersistentlyBanned(data.pubHash)){ this.ac.ban(fromId, 'persistent ban', false); return }
       acLog(`✓ ${fromId.slice(0,6)} id:${(data.pubHash||'?').slice(0,6)}${p.verified?' v':''}`)
     }
   }
@@ -1169,14 +1056,13 @@ class GameScene extends Phaser.Scene {
         if (peerId !== fromId) this.sendTo('vote', data, peerId)
       }
     }
-    if (data.kind === 'start')      this.beginVote(data.target, fromId)
-    else if (data.kind === 'cast')  this.castVote(fromId, data.agree)
+    if (data.kind === 'start') this.beginVote(data.target, fromId)
+    else if (data.kind === 'cast') this.castVote(fromId, data.agree)
     else if (data.kind === 'blacklist'){
       this.hostBlacklist.add(data.id)
       this.updateStatus()
     }
   }
-
   onPeerLeft(id){
     DBG.log('PEER', '👋 onPeerLeft', id.slice(0,12))
     delete this.inputs[id]
@@ -1195,93 +1081,127 @@ class GameScene extends Phaser.Scene {
     return this.serverHostId
   }
 
-  addPlayerToWorld(id){
-    if (!id) return
-    if (this.worldPlayers[id]) return
+  isInsideWall(x, y, r){
+    for (const w of this.wallRects){
+      if (x > w.x-r && x < w.x+w.w+r && y > w.y-r && y < w.y+w.h+r) return true
+    }
+    return false
+  }
 
+  spawnPickup(){
+    const types = ['hp','rapid','homing','ricochet','shield']
+    const type = types[Math.floor(Math.random()*types.length)]
+    let x, y, tries = 0
+    do {
+      x = 100 + Math.random() * (CFG.W - 200)
+      y = 100 + Math.random() * (CFG.H - 200)
+      tries++
+    } while (this.isInsideWall(x, y, 40) && tries < 40)
+    if (tries >= 40) return
+    const id = 'pk_' + (++this.pickupSeq)
+    this.pickups.push({ id, type, x, y })
+    DBG.log('PICKUP', 'spawn', type, 'at', Math.round(x), Math.round(y))
+  }
+
+  applyPickup(id, type){
+    const p = this.worldPlayers[id]
+    if (!p) return
+    if (!p.bonuses) p.bonuses = { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0 }
+    const now = performance.now()
+    if (type === 'hp'){
+      p.hp = Math.min(p.hp + CFG.BONUS_HP_AMOUNT, CFG.MAX_HP)
+    } else if (type === 'rapid'){
+      p.bonuses.rapidUntil = now + CFG.BONUS_DURATION
+    } else if (type === 'homing'){
+      p.bonuses.homingUntil = now + CFG.BONUS_DURATION
+    } else if (type === 'ricochet'){
+      p.bonuses.ricochetUntil = now + CFG.BONUS_DURATION
+    } else if (type === 'shield'){
+      p.bonuses.shieldHits = (p.bonuses.shieldHits || 0) + 1
+    }
+    DBG.log('PICKUP', id.slice(0,8), 'got', type)
+  }
+
+  resetBonuses(p){
+    p.bonuses = { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0 }
+  }
+
+  syncPickups(list){
+    if (!list) return
+    const seen = new Set()
+    for (let i = 0; i < list.length; i++){
+      const [id, type, x, y] = list[i]
+      seen.add(id)
+      if (!this.pickupSprites[id]){
+        const emoji = { hp:'❤️', rapid:'⚡', homing:'🎯', ricochet:'🏓', shield:'🛡' }[type] || '❓'
+        const t = this.add.text(x, y, emoji, { fontSize: '32px', fontFamily: 'monospace' })
+          .setOrigin(0.5).setDepth(6).setAlpha(0.9)
+        this.tweens.add({
+          targets: t, scale: { from: 0.85, to: 1.15 },
+          duration: 700, yoyo: true, repeat: -1,
+        })
+        this.pickupSprites[id] = t
+      } else {
+        this.pickupSprites[id].setPosition(x, y)
+      }
+    }
+    for (const id in this.pickupSprites){
+      if (!seen.has(id)){
+        this.pickupSprites[id].destroy()
+        delete this.pickupSprites[id]
+      }
+    }
+  }
+
+  addPlayerToWorld(id){
+    if (!id || this.worldPlayers[id]) return
     const v = this.views[id]
     const idx = Object.keys(this.worldPlayers).length
     const spawn = SPAWNS[idx % SPAWNS.length]
-
     this.worldPlayers[id] = {
-      x: (v && v.init && (v.tx || v.ty)) ? v.tx : spawn.x,
-      y: (v && v.init && (v.tx || v.ty)) ? v.ty : spawn.y,
-      vx: 0, vy: 0,
-      aimX: 1, aimY: 0,
-      hp: CFG.MAX_HP,
-      dead: false,
-      fireAt: 0, respawnAt: 0,
-      score: 0,
+      x: (v && v.init && (v.tx||v.ty)) ? v.tx : spawn.x,
+      y: (v && v.init && (v.tx||v.ty)) ? v.ty : spawn.y,
+      vx:0, vy:0, aimX:1, aimY:0,
+      hp: CFG.MAX_HP, dead:false, fireAt:0, respawnAt:0, score:0,
+      bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0 },
     }
-
     if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
-    DBG.log('HOST', 'added player to world:', id.slice(0,12),
-      'at', this.worldPlayers[id].x, this.worldPlayers[id].y)
+    DBG.log('HOST', 'added player to world:', id.slice(0,12))
   }
 
   becomeHost(){
     DBG.log('HOST', 'becomeHost() called')
-
-    const myCurX = this.predicted.x
-    const myCurY = this.predicted.y
-    const meWasInitialized = Math.abs(myCurX) > 1 || Math.abs(myCurY) > 1
-
+    const myCurX = this.predicted.x, myCurY = this.predicted.y
+    const meWasInit = Math.abs(myCurX) > 1 || Math.abs(myCurY) > 1
     this.worldPlayers = {}
+    this.pickups = []
+    this.lastPickupSpawn = 0
     const ids = [this.myPeerId, ...this.peers].filter(id => id && !this.ac.bans.has(id))
-
     for (const id of ids){
       const v = this.views[id]
       const spawn = SPAWNS[ids.indexOf(id) % SPAWNS.length]
-      const useViewPos = v && v.init && (Math.abs(v.tx) > 1 || Math.abs(v.ty) > 1)
-
+      const use = v && v.init && (Math.abs(v.tx) > 1 || Math.abs(v.ty) > 1)
       this.worldPlayers[id] = {
-        x: useViewPos ? v.tx : spawn.x,
-        y: useViewPos ? v.ty : spawn.y,
-        vx: 0, vy: 0,
-        aimX: 1, aimY: 0,
-        hp: v ? v.hp : CFG.MAX_HP,
-        dead: v ? v.dead : false,
-        fireAt: 0, respawnAt: 0,
-        score: 0,
+        x: use ? v.tx : spawn.x, y: use ? v.ty : spawn.y,
+        vx:0, vy:0, aimX:1, aimY:0,
+        hp: v ? v.hp : CFG.MAX_HP, dead: v ? v.dead : false,
+        fireAt:0, respawnAt:0, score:0,
+        bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0 },
       }
-
       if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
     }
-
     const me = this.worldPlayers[this.myPeerId]
     if (me){
-      if (meWasInitialized){
-        me.x = myCurX
-        me.y = myCurY
-      } else {
-        const s = SPAWNS[0]
-        me.x = s.x
-        me.y = s.y
-      }
-
-      this.local.x = me.x
-      this.local.y = me.y
-      this.predicted.x = me.x
-      this.predicted.y = me.y
-
+      if (meWasInit){ me.x = myCurX; me.y = myCurY }
+      else { const s = SPAWNS[0]; me.x = s.x; me.y = s.y }
+      this.local.x = me.x; this.local.y = me.y
+      this.predicted.x = me.x; this.predicted.y = me.y
       const v = this.views[this.myPeerId]
-      if (v){
-        v.tx = me.x
-        v.ty = me.y
-        v.sprite.x = me.x
-        v.sprite.y = me.y
-        v.init = true
-      }
+      if (v){ v.tx = me.x; v.ty = me.y; v.sprite.x = me.x; v.sprite.y = me.y; v.init = true }
     }
-
     for (const peerId of this.peers){
-      this.sendBan({
-        full: true,
-        bans: [...this.ac.bans],
-        pbans: [...this.ac.persistentBans],
-      }, peerId)
+      this.sendBan({ full:true, bans:[...this.ac.bans], pbans:[...this.ac.persistentBans] }, peerId)
     }
-
     acLog(`👑 хост: ${this.myPeerId.slice(0,6)}`)
     this.updateStatus()
   }
@@ -1290,54 +1210,43 @@ class GameScene extends Phaser.Scene {
   onVoteClick(){
     const hostId = this.currentHostId()
     if (!hostId || hostId === this.myPeerId){ acLog('✖ ты хост'); return }
-
     if (this.voteActive && this.voteTarget === hostId){
       const already = this.votes.has(this.myPeerId)
       this.castVote(this.myPeerId, !already)
       this.sendVote({ kind:'cast', agree: !already })
       return
     }
-
     this.beginVote(hostId, this.myPeerId)
     this.sendVote({ kind:'start', target: hostId })
   }
-
-  beginVote(targetHost, initiator){
+  beginVote(target, initiator){
     if (this.voteActive) return
     this.voteActive = true
-    this.voteTarget = targetHost
+    this.voteTarget = target
     this.voteDeadline = performance.now() + VOTE_DURATION_MS
     this.votes.clear()
-    if (initiator) this.votes.set(initiator, targetHost)
-    acLog(`🗳 голосование: сменить ${targetHost.slice(0,6)}`)
+    if (initiator) this.votes.set(initiator, target)
+    acLog(`🗳 голосование`)
     this.updateVoteUI()
   }
-
   castVote(voter, agree){
-    if (!this.voteActive || !this.voteTarget) return
+    if (!this.voteActive) return
     if (agree) this.votes.set(voter, this.voteTarget)
     else this.votes.delete(voter)
     this.checkVoteResult()
     this.updateVoteUI()
   }
-
   checkVoteResult(){
     if (!this.voteActive) return
     const total = 1 + this.peers.size
     const yes = this.votes.size
-    const passed = yes > total / 2
     const failed = performance.now() > this.voteDeadline
-    if (passed){
+    if (yes > total / 2){
       this.hostBlacklist.add(this.voteTarget)
       this.sendVote({ kind:'blacklist', id: this.voteTarget })
-      acLog(`✅ ${this.voteTarget.slice(0,6)} снят (${yes}/${total})`)
       this.endVote()
-    } else if (failed){
-      acLog(`✖ провал (${yes}/${total})`)
-      this.endVote()
-    }
+    } else if (failed) this.endVote()
   }
-
   endVote(){
     this.voteActive = false
     this.voteTarget = null
@@ -1345,14 +1254,9 @@ class GameScene extends Phaser.Scene {
     this.voteBtn.classList.remove('armed')
     this.updateVoteUI()
   }
-
   updateVoteUI(){
     if (!this.voteInfo || !this.voteBtn) return
-    if (!this.voteActive){
-      this.voteInfo.textContent = ''
-      this.voteBtn.classList.remove('armed')
-      return
-    }
+    if (!this.voteActive){ this.voteInfo.textContent = ''; this.voteBtn.classList.remove('armed'); return }
     const total = 1 + this.peers.size
     const yes = this.votes.size
     this.voteInfo.textContent = `VOTE ${yes}/${total}\nцель: ${(this.voteTarget||'').slice(0,6)}`
@@ -1367,28 +1271,38 @@ class GameScene extends Phaser.Scene {
     const hp = Math.max(0, Math.round(this.local.hp))
     const sc = this.local.score || 0
     const myName = this.peerNames[this.myPeerId] || this.myName || '?'
-
     let ping = 0
     for (const [, p] of this.ac.peers){
       const v = p.rtt || 0
       if (v > 0 && v < 5000 && v > ping) ping = v
     }
     ping = Math.round(ping)
-
     this.statusEl.textContent = `${role} · ${myName} · ${this.roomId} · игроков: ${n} · HP: ${hp} · очки: ${sc} · ping: ${ping}ms`
+  }
+
+  renderBonuses(){
+    if (!this.bonusesEl) return
+    const bn = this.localBonuses
+    const now = performance.now()
+    const parts = []
+    if (bn[0] > now) parts.push(`⚡ ${Math.ceil((bn[0]-now)/1000)}s`)
+    if (bn[1] > now) parts.push(`🎯 ${Math.ceil((bn[1]-now)/1000)}s`)
+    if (bn[2] > now) parts.push(`🏓 ${Math.ceil((bn[2]-now)/1000)}s`)
+    if (bn[3] > 0) parts.push(`🛡 ×${bn[3]}`)
+    if (parts.length){
+      this.bonusesEl.textContent = parts.join(' · ')
+      this.bonusesEl.style.display = 'block'
+    } else {
+      this.bonusesEl.style.display = 'none'
+    }
   }
 
   renderScores(){
     if (!this.scoresEl) return
-    if (!this.scores || Object.keys(this.scores).length === 0){
-      this.scoresEl.textContent = ''
-      return
-    }
-
+    if (!this.scores || Object.keys(this.scores).length === 0){ this.scoresEl.textContent = ''; return }
     const rows = []
     for (const id in this.scores){
       if (id !== this.myPeerId && !this.peers.has(id)) continue
-
       const score = this.scores[id]
       const v = this.views[id]
       const isMe = id === this.myPeerId
@@ -1396,7 +1310,6 @@ class GameScene extends Phaser.Scene {
       rows.push({ id, score, isMe, dead })
     }
     rows.sort((a,b) => b.score - a.score)
-
     let html = '🏆 СЧЁТ\n'
     for (let i = 0; i < rows.length; i++){
       const r = rows[i]
@@ -1412,28 +1325,39 @@ class GameScene extends Phaser.Scene {
   /* =========== STATE =========== */
   applyState(data){
     if (!data || !data.p) return
-
     if (data.names){
       for (const id in data.names){
         const n = cleanName(data.names[id])
         if (n) this.peerNames[id] = n
       }
     }
-
     if (data.scores){
       this.scores = data.scores
       if (this.myPeerId && this.scores[this.myPeerId] !== undefined){
         this.local.score = this.scores[this.myPeerId]
       }
     }
+    if (data.pickups) this.syncPickups(data.pickups)
 
+    const now = performance.now()
     for (const id in data.p){
       if (id !== this.myPeerId && !this.peers.has(id)) continue
-
-      const [x,y,ax,ay,hp,dead] = data.p[id]
+      const arr = data.p[id]
+      const x = arr[0], y = arr[1], ax = arr[2], ay = arr[3], hp = arr[4], dead = arr[5]
+      const bn = arr[6]
       if (id === this.myPeerId){
         this.local.hp = hp
         this.local.dead = !!dead
+        if (bn && Array.isArray(bn) && bn.length === 4){
+          this.localBonuses = [
+            bn[0] > 0 ? now + bn[0] : 0,
+            bn[1] > 0 ? now + bn[1] : 0,
+            bn[2] > 0 ? now + bn[2] : 0,
+            bn[3] || 0,
+          ]
+        } else {
+          this.localBonuses = [0, 0, 0, 0]
+        }
         const dx = x - this.predicted.x, dy = y - this.predicted.y
         if (Math.abs(dx) > 120 || Math.abs(dy) > 120){
           this.predicted.x = x; this.predicted.y = y
@@ -1445,13 +1369,12 @@ class GameScene extends Phaser.Scene {
         let v = this.views[id]
         if (!v){ v = this.createView(id); v.tx = x; v.ty = y; v.init = true; v.sprite.x = x; v.sprite.y = y }
         if (!v.buffer) v.buffer = []
-        v.buffer.push({ x, y, ax, ay, hp, dead, t: performance.now() })
+        v.buffer.push({ x, y, ax, ay, hp, dead, bn, t: now })
         while (v.buffer.length > 15) v.buffer.shift()
         v.tx = x; v.ty = y
         v.hp = hp; v.dead = !!dead
       }
     }
-
     for (const id in this.views){
       if (id === this.myPeerId) continue
       if (!(id in data.p) || !this.peers.has(id)){
@@ -1464,12 +1387,18 @@ class GameScene extends Phaser.Scene {
 
   spawnGhostBullet(d){
     if (this.ghostBullets[d.id]) return
+    let color = 0xffe066
+    if (d.homing && d.ricochet) color = 0xff22ff
+    else if (d.homing) color = 0xff66ff
+    else if (d.ricochet) color = 0x22ffff
     const s = this.add.image(d.x, d.y, 'bullet')
       .setDisplaySize(CFG.BULLET_SIZE, CFG.BULLET_SIZE)
-      .setTint(0xffe066)
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setDepth(5)
-    this.ghostBullets[d.id] = { sprite:s, vx:d.vx, vy:d.vy, born:this.time.now }
+      .setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(5)
+    this.ghostBullets[d.id] = {
+      sprite: s, vx: d.vx, vy: d.vy, born: this.time.now,
+      bouncesLeft: d.ricochet || 0,
+      homing: !!d.homing,
+    }
   }
 
   applyHit(d){
@@ -1478,15 +1407,24 @@ class GameScene extends Phaser.Scene {
       delete this.ghostBullets[d.bid]
     }
     if (d.target === this.myPeerId){
-      this.local.hp = d.hp
-      this.local.dead = !!d.dead
-      this.cameras.main.flash(90, 255, 30, 100)
+      if (d.blocked){
+        this.cameras.main.flash(90, 100, 200, 255)
+        if (this.localBonuses[3] > 0) this.localBonuses[3]--
+      } else {
+        this.local.hp = d.hp
+        this.local.dead = !!d.dead
+        this.cameras.main.flash(90, 255, 30, 100)
+        if (d.dead) this.localBonuses = [0, 0, 0, 0]
+      }
     }
     const v = this.views[d.target]
     if (v){
-      v.hp = d.hp; v.dead = !!d.dead
-      v.sprite.setTintFill(0xffffff)
-      this.time.delayedCall(60, ()=>{ if (v.sprite && v.sprite.active) v.sprite.setTint(colorFromId(d.target)) })
+      v.hp = d.hp
+      if (d.dead) v.dead = true
+      v.sprite.setTintFill(d.blocked ? 0x88ccff : 0xffffff)
+      this.time.delayedCall(60, ()=>{
+        if (v.sprite && v.sprite.active) v.sprite.setTint(colorFromId(d.target))
+      })
     }
     if (d.by === this.myPeerId) this.cameras.main.shake(50, 0.002)
   }
@@ -1495,18 +1433,16 @@ class GameScene extends Phaser.Scene {
   createView(id){
     if (this.views[id]) return this.views[id]
     const sprite = this.add.image(0, 0, 'player')
-      .setDisplaySize(CFG.PLAYER_W, CFG.PLAYER_H)
-      .setDepth(10)
-      .setTint(colorFromId(id))
+      .setDisplaySize(CFG.PLAYER_W, CFG.PLAYER_H).setDepth(10).setTint(colorFromId(id))
     const bar = this.add.graphics().setDepth(11)
     const label = this.add.text(0, 0, this.peerNames[id] || id.slice(0, 6), {
-      fontFamily: 'monospace',
-      fontSize: '11px',
-      color: '#e6edf3',
-      stroke: '#000000',
-      strokeThickness: 3,
+      fontFamily: 'monospace', fontSize: '11px', color: '#e6edf3',
+      stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5, 1).setDepth(12)
-    this.views[id] = { sprite, bar, label, hp:CFG.MAX_HP, dead:false, tx:0, ty:0, ta:0, init:false, buffer:[] }
+    const shield = this.add.circle(0, 0, CFG.PLAYER_W * 0.6, 0x66ccff, 0.25)
+      .setDepth(9).setVisible(false)
+    this.views[id] = { sprite, bar, label, shield, hp:CFG.MAX_HP, dead:false,
+                       tx:0, ty:0, ta:0, init:false, buffer:[] }
     return this.views[id]
   }
   destroyView(id){
@@ -1514,6 +1450,7 @@ class GameScene extends Phaser.Scene {
     v.sprite.destroy()
     v.bar.destroy()
     if (v.label) v.label.destroy()
+    if (v.shield) v.shield.destroy()
     delete this.views[id]
   }
 
@@ -1546,6 +1483,15 @@ class GameScene extends Phaser.Scene {
       }
     }
 
+    /* 🆕 Периодическая отправка имени хосту */
+    if (!this.isHost && time - this._lastNameSent > 5000){
+      this._lastNameSent = time
+      const hostId = this.currentHostId()
+      if (hostId && hostId !== this.myPeerId){
+        this.sendId({ name: this.myName }, hostId)
+      }
+    }
+
     if (!this.isHost && time - this.lastInputSent > CFG.INPUT_MS){
       this.lastInputSent = time
       const hostId = this.currentHostId()
@@ -1574,13 +1520,16 @@ class GameScene extends Phaser.Scene {
       this.simulateHost(time, dt)
     }
 
-    /* Локальное предсказание пуль у клиента — только у не-хоста */
+    /* Локальное предсказание пуль у клиента */
     if (!this.isHost && this.firing && time - this._lastLocalShot > CFG.FIRE_CD && !this.local.dead){
       this._lastLocalShot = time
       const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
       const ax = this.aimVec.x / len
       const ay = this.aimVec.y / len
       const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
+      const now = performance.now()
+      const hasHoming = this.localBonuses[1] > now
+      const hasRicochet = this.localBonuses[2] > now
       this.spawnGhostBullet({
         id,
         x: this.local.x + ax * (CFG.PLAYER_R + 6),
@@ -1588,17 +1537,24 @@ class GameScene extends Phaser.Scene {
         vx: ax * CFG.BULLET_SPEED,
         vy: ay * CFG.BULLET_SPEED,
         owner: this.myPeerId,
+        homing: hasHoming,
+        ricochet: hasRicochet ? CFG.BONUS_RICOCHET_MAX : 0,
       })
     }
 
     this.updateGhostBullets(time, dt)
     this.renderPlayers(time, dt)
-    if (time % 200 < 20){ this.updateStatus(); this.updateVoteUI(); this.renderScores() }
+    if (time % 200 < 20){
+      this.updateStatus()
+      this.updateVoteUI()
+      this.renderScores()
+      this.renderBonuses()
+    }
   }
 
   resolveWorld(x, y){
-    x = clamp(x, CFG.PLAYER_R, CFG.W-CFG.PLAYER_R)
-    y = clamp(y, CFG.PLAYER_R, CFG.H-CFG.PLAYER_R)
+    x = clamp(x, CFG.PLAYER_R, CFG.W - CFG.PLAYER_R)
+    y = clamp(y, CFG.PLAYER_R, CFG.H - CFG.PLAYER_R)
     for (const r of this.wallRects){
       const res = resolveCircleRect(x, y, CFG.PLAYER_R, r)
       if (res){ x = res.x; y = res.y }
@@ -1608,19 +1564,23 @@ class GameScene extends Phaser.Scene {
 
   /* =========== HOST SIM =========== */
   simulateHost(time, dt){
+    const now = performance.now()
+
+    /* Игроки */
     for (const id in this.worldPlayers){
       const p = this.worldPlayers[id]
       let inp = this.inputs[id] || { m:[0,0], a:[1,0], f:0 }
-
       const lastInputAge = time - (inp._t || 0)
       if (lastInputAge > 500 && id !== this.myPeerId){
         inp = { m:[0,0], a: inp.a || [1,0], f: 0 }
       }
+      if (!p.bonuses) this.resetBonuses(p)
 
       if (p.dead){
         if (time > p.respawnAt){
           const sp = SPAWNS[Math.floor(Math.random()*SPAWNS.length)]
           p.x = sp.x; p.y = sp.y; p.hp = CFG.MAX_HP; p.dead = false; p.vx = 0; p.vy = 0
+          this.resetBonuses(p)
         } else continue
       }
 
@@ -1629,57 +1589,158 @@ class GameScene extends Phaser.Scene {
       p.vy = (inp.m[1]||0) * CFG.SPEED
       const nx = p.x + p.vx*dt, ny = p.y + p.vy*dt
       const res = this.resolveWorld(nx, ny)
-
       const fixed = this.ac.validateMovement(id, prev, res, dt)
       p.x = fixed.x; p.y = fixed.y
       this.ac.recordPosition(id, p.x, p.y)
-
       p.aimX = inp.a[0] || 1
       p.aimY = inp.a[1] || 0
 
-      if (inp.f && time - p.fireAt > CFG.FIRE_CD){
-        if (!this.ac.validateFire(id, time, CFG.FIRE_CD)) continue
+      /* Стрельба с бонусами */
+      const rapid = (p.bonuses.rapidUntil || 0) > now
+      const homingActive = (p.bonuses.homingUntil || 0) > now
+      const ricochetActive = (p.bonuses.ricochetUntil || 0) > now
+      const fireCd = rapid ? CFG.FIRE_CD * CFG.BONUS_FIRE_MUL : CFG.FIRE_CD
+
+      if (inp.f && time - p.fireAt > fireCd){
+        if (!this.ac.validateFire(id, time, fireCd)) continue
         const len = Math.hypot(p.aimX, p.aimY) || 1
         const ax = p.aimX/len, ay = p.aimY/len
         p.fireAt = time
-        const hitId = hostSimulateShot(this.ac, id, { x:p.x, y:p.y }, [ax,ay], this.worldPlayers, this.wallRects)
-        this.hostSpawnBullet(id, p.x, p.y, p.aimX, p.aimY)
-        if (hitId){
-          const t = this.worldPlayers[hitId]
-          t.hp -= CFG.DAMAGE
-          let killed = false
-          if (t.hp <= 0){
-            t.hp = 0
-            t.dead = true
-            t.respawnAt = time + CFG.RESPAWN
-            killed = true
+        this.hostSpawnBullet(id, p.x, p.y, ax, ay, {
+          homing: homingActive,
+          ricochet: ricochetActive ? CFG.BONUS_RICOCHET_MAX : 0,
+        })
+      }
 
-            const shooter = this.worldPlayers[id]
-            if (shooter){
-              shooter.score = (shooter.score || 0) + 1
-              DBG.log('SCORE', id.slice(0,8), 'killed', hitId.slice(0,8),
-                      '→ score:', shooter.score)
-            }
-          }
-          const hd = { bid:null, target:hitId, by:id, hp:t.hp, dead:t.dead, killed }
-          this.sendHit(hd)
-          this.applyHit(hd)
+      /* Подбор ящиков */
+      for (let i = this.pickups.length - 1; i >= 0; i--){
+        const pk = this.pickups[i]
+        const dx = p.x - pk.x, dy = p.y - pk.y
+        const rr = CFG.PLAYER_R + CFG.PICKUP_RADIUS
+        if (dx*dx + dy*dy < rr*rr){
+          this.applyPickup(id, pk.type)
+          this.pickups.splice(i, 1)
         }
       }
     }
 
-    for (let i = this.bullets.length-1; i >= 0; i--){
-      const b = this.bullets[i]
-      b.x += b.vx*dt; b.y += b.vy*dt
-      if (time - b.born > CFG.BULLET_LIFE*1000){ this.bullets.splice(i,1); continue }
-      let dead = false
-      for (const r of this.wallRects){
-        if (b.x > r.x-CFG.BULLET_R && b.x < r.x+r.w+CFG.BULLET_R &&
-            b.y > r.y-CFG.BULLET_R && b.y < r.y+r.h+CFG.BULLET_R){ dead = true; break }
-      }
-      if (dead) this.bullets.splice(i,1)
+    /* Спавн ящиков */
+    if (time - this.lastPickupSpawn > CFG.PICKUP_INTERVAL && this.pickups.length < CFG.PICKUP_MAX){
+      this.lastPickupSpawn = time
+      this.spawnPickup()
     }
 
+    /* Пули: движение, homing, рикошет, попадания */
+    for (let i = this.bullets.length - 1; i >= 0; i--){
+      const b = this.bullets[i]
+
+      /* Самонаведение с погрешностью */
+      if (b.homing){
+        let nearest = null, nd = Infinity
+        for (const tid in this.worldPlayers){
+          if (tid === b.owner) continue
+          const t = this.worldPlayers[tid]
+          if (t.dead) continue
+          const dx = t.x - b.x, dy = t.y - b.y
+          const d2 = dx*dx + dy*dy
+          if (d2 < nd){ nd = d2; nearest = t }
+        }
+        if (nearest){
+          const dx = nearest.x - b.x, dy = nearest.y - b.y
+          const targetAngle = Math.atan2(dy, dx)
+          const curAngle = Math.atan2(b.vy, b.vx)
+          const noise = (Math.random() - 0.5) * CFG.BONUS_HOMING_NOISE
+          const wantAngle = targetAngle + noise
+          let diff = wantAngle - curAngle
+          while (diff > Math.PI) diff -= 2*Math.PI
+          while (diff < -Math.PI) diff += 2*Math.PI
+          const turn = Math.max(-CFG.BONUS_HOMING_TURN, Math.min(CFG.BONUS_HOMING_TURN, diff))
+          const speed = Math.hypot(b.vx, b.vy)
+          const newAngle = curAngle + turn
+          b.vx = Math.cos(newAngle) * speed
+          b.vy = Math.sin(newAngle) * speed
+        }
+      }
+
+      let nx = b.x + b.vx*dt
+      let ny = b.y + b.vy*dt
+
+      let hitWall = null
+      for (const r of this.wallRects){
+        if (nx > r.x-CFG.BULLET_R && nx < r.x+r.w+CFG.BULLET_R &&
+            ny > r.y-CFG.BULLET_R && ny < r.y+r.h+CFG.BULLET_R){ hitWall = r; break }
+      }
+
+      if (hitWall){
+        if (b.bouncesLeft > 0){
+          b.bouncesLeft--
+          const cx = hitWall.x + hitWall.w/2
+          const cy = hitWall.y + hitWall.h/2
+          const dx = nx - cx, dy = ny - cy
+          const halfW = hitWall.w/2 + CFG.BULLET_R
+          const halfH = hitWall.h/2 + CFG.BULLET_R
+          const overlapX = halfW - Math.abs(dx)
+          const overlapY = halfH - Math.abs(dy)
+          if (overlapX < overlapY){
+            b.vx = -b.vx
+            nx = b.x + Math.sign(dx || 1) * overlapX
+          } else {
+            b.vy = -b.vy
+            ny = b.y + Math.sign(dy || 1) * overlapY
+          }
+        } else {
+          this.bullets.splice(i, 1)
+          continue
+        }
+      }
+
+      b.x = nx
+      b.y = ny
+
+      if (time - b.born > CFG.BULLET_LIFE*1000){
+        this.bullets.splice(i, 1)
+        continue
+      }
+
+      /* Попадания */
+      let hitSomeone = false
+      for (const tid in this.worldPlayers){
+        if (tid === b.owner) continue
+        const t = this.worldPlayers[tid]
+        if (t.dead) continue
+        const dx = t.x - b.x, dy = t.y - b.y
+        const rr = CFG.PLAYER_R + CFG.BULLET_R
+        if (dx*dx + dy*dy < rr*rr){
+          let blocked = false
+          if (t.bonuses && t.bonuses.shieldHits > 0){
+            t.bonuses.shieldHits--
+            blocked = true
+          } else {
+            t.hp -= CFG.DAMAGE
+          }
+          let killed = false
+          if (!blocked && t.hp <= 0){
+            t.hp = 0; t.dead = true; t.respawnAt = time + CFG.RESPAWN
+            killed = true
+            this.resetBonuses(t)
+            const shooter = this.worldPlayers[b.owner]
+            if (shooter){
+              shooter.score = (shooter.score || 0) + 1
+              DBG.log('SCORE', b.owner.slice(0,8), 'killed', tid.slice(0,8))
+            }
+          }
+          const hd = { bid: b.id, target: tid, by: b.owner, hp: t.hp, dead: t.dead, killed, blocked }
+          this.sendHit(hd)
+          this.applyHit(hd)
+          this.bullets.splice(i, 1)
+          hitSomeone = true
+          break
+        }
+      }
+      if (hitSomeone) continue
+    }
+
+    /* State */
     if (time - this.lastStateSent > CFG.STATE_MS){
       this.lastStateSent = time
 
@@ -1702,10 +1763,12 @@ class GameScene extends Phaser.Scene {
       }
 
       const names = {}
-      for (const id in this.peerNames){
-        names[id] = this.peerNames[id]
-      }
+      for (const id in this.peerNames) names[id] = this.peerNames[id]
       names[this.myPeerId] = this.myName
+
+      const pickups = this.pickups.map(pk => [
+        pk.id, pk.type, Math.round(pk.x), Math.round(pk.y)
+      ])
 
       for (const peerId of [this.myPeerId, ...this.peers]){
         if (this.ac.bans.has(peerId)) continue
@@ -1715,20 +1778,28 @@ class GameScene extends Phaser.Scene {
         for (const id of visible){
           const w = this.worldPlayers[id]
           if (!w) continue
+          const bn = w.bonuses || { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0 }
           pack[id] = [
             Math.round(w.x), Math.round(w.y),
             Math.round(w.aimX*100)/100, Math.round(w.aimY*100)/100,
             Math.round(w.hp), w.dead ? 1 : 0,
+            [
+              Math.max(0, Math.round((bn.rapidUntil||0) - now)),
+              Math.max(0, Math.round((bn.homingUntil||0) - now)),
+              Math.max(0, Math.round((bn.ricochetUntil||0) - now)),
+              bn.shieldHits || 0,
+            ],
           ]
         }
-        const payload = { p: pack, scores, names }
+        const payload = { p: pack, scores, names, pickups }
         if (peerId === this.myPeerId) this.applyState(payload)
         else this.sendState(payload, peerId)
       }
     }
   }
 
-  hostSpawnBullet(ownerId, x, y, ax, ay){
+  hostSpawnBullet(ownerId, x, y, ax, ay, opts){
+    opts = opts || {}
     const len = Math.hypot(ax, ay) || 1
     const id = this.myPeerId + '-' + (++this.bulletSeq)
     const b = {
@@ -1738,9 +1809,14 @@ class GameScene extends Phaser.Scene {
       vx: (ax/len)*CFG.BULLET_SPEED,
       vy: (ay/len)*CFG.BULLET_SPEED,
       owner: ownerId, born: this.time.now,
+      homing: !!opts.homing,
+      bouncesLeft: opts.ricochet || 0,
     }
     this.bullets.push(b)
-    const payload = { id:b.id, x:b.x, y:b.y, vx:b.vx, vy:b.vy, owner:ownerId }
+    const payload = {
+      id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, owner: ownerId,
+      homing: b.homing, ricochet: b.bouncesLeft,
+    }
     this.sendBullet(payload)
     this.spawnGhostBullet(payload)
   }
@@ -1748,16 +1824,46 @@ class GameScene extends Phaser.Scene {
   updateGhostBullets(time, dt){
     for (const id in this.ghostBullets){
       const g = this.ghostBullets[id]
-      g.sprite.x += g.vx*dt
-      g.sprite.y += g.vy*dt
-      let kill = time - g.born > CFG.BULLET_LIFE*1000
-      if (!kill){
-        for (const r of this.wallRects){
-          if (g.sprite.x > r.x-CFG.BULLET_R && g.sprite.x < r.x+r.w+CFG.BULLET_R &&
-              g.sprite.y > r.y-CFG.BULLET_R && g.sprite.y < r.y+r.h+CFG.BULLET_R){ kill = true; break }
+      let nx = g.sprite.x + g.vx*dt
+      let ny = g.sprite.y + g.vy*dt
+
+      let hitWall = null
+      for (const r of this.wallRects){
+        if (nx > r.x-CFG.BULLET_R && nx < r.x+r.w+CFG.BULLET_R &&
+            ny > r.y-CFG.BULLET_R && ny < r.y+r.h+CFG.BULLET_R){ hitWall = r; break }
+      }
+
+      if (hitWall){
+        if (g.bouncesLeft > 0){
+          g.bouncesLeft--
+          const cx = hitWall.x + hitWall.w/2
+          const cy = hitWall.y + hitWall.h/2
+          const dx = nx - cx, dy = ny - cy
+          const halfW = hitWall.w/2 + CFG.BULLET_R
+          const halfH = hitWall.h/2 + CFG.BULLET_R
+          const overlapX = halfW - Math.abs(dx)
+          const overlapY = halfH - Math.abs(dy)
+          if (overlapX < overlapY){
+            g.vx = -g.vx
+            nx = g.sprite.x + Math.sign(dx || 1) * overlapX
+          } else {
+            g.vy = -g.vy
+            ny = g.sprite.y + Math.sign(dy || 1) * overlapY
+          }
+        } else {
+          g.sprite.destroy()
+          delete this.ghostBullets[id]
+          continue
         }
       }
-      if (kill){ g.sprite.destroy(); delete this.ghostBullets[id] }
+
+      g.sprite.x = nx
+      g.sprite.y = ny
+
+      if (time - g.born > CFG.BULLET_LIFE*1000){
+        g.sprite.destroy()
+        delete this.ghostBullets[id]
+      }
     }
   }
 
@@ -1768,7 +1874,6 @@ class GameScene extends Phaser.Scene {
         this.destroyView(id)
         continue
       }
-
       const v = this.views[id]
 
       if (id === this.myPeerId){
@@ -1805,6 +1910,20 @@ class GameScene extends Phaser.Scene {
       v.sprite.rotation = v.ta
       const vis = !v.dead
       v.sprite.setVisible(vis); v.bar.setVisible(vis)
+
+      /* Ободок щита */
+      if (v.shield){
+        let shields = 0
+        if (id === this.myPeerId){
+          shields = this.localBonuses[3] || 0
+        } else if (v.buffer && v.buffer.length){
+          const last = v.buffer[v.buffer.length - 1]
+          shields = (last.bn && last.bn[3]) || 0
+        }
+        v.shield.setPosition(v.sprite.x, v.sprite.y)
+        v.shield.setVisible(vis && shields > 0)
+      }
+
       if (vis){
         const bx = v.sprite.x - 20, by = v.sprite.y - 34
         const w = 40 * (v.hp / CFG.MAX_HP)
@@ -1812,7 +1931,6 @@ class GameScene extends Phaser.Scene {
         v.bar.fillStyle(0x000000, 0.6); v.bar.fillRect(bx-1, by-1, 42, 7)
         v.bar.fillStyle(v.hp>50?0x3fb950:v.hp>25?0xd29922:0xf85149, 1)
         v.bar.fillRect(bx, by, w, 5)
-
         if (v.label){
           const currentName = this.peerNames[id] || id.slice(0, 6)
           if (v.label.text !== currentName) v.label.setText(currentName)
