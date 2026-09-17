@@ -670,13 +670,13 @@ class GameScene extends Phaser.Scene {
     this._lastLocalShot = 0
     this._lastNameSent = 0
 
-    /* 🎁 Ящики с бонусами */
+    /* Ящики с бонусами */
     this.pickups = []
     this.pickupSprites = {}
     this.pickupSeq = 0
     this.lastPickupSpawn = 0
 
-    /* 🎁 Локальные бонусы: [rapidUntil, homingUntil, ricochetUntil, shieldHits] */
+    /* Локальные бонусы: [rapidUntil, homingUntil, ricochetUntil, shieldHits] */
     this.localBonuses = [0, 0, 0, 0]
 
     /* Голосование */
@@ -1483,7 +1483,7 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    /* 🆕 Периодическая отправка имени хосту */
+    /* Периодическая отправка имени хосту */
     if (!this.isHost && time - this._lastNameSent > 5000){
       this._lastNameSent = time
       const hostId = this.currentHostId()
@@ -1566,7 +1566,6 @@ class GameScene extends Phaser.Scene {
   simulateHost(time, dt){
     const now = performance.now()
 
-    /* Игроки */
     for (const id in this.worldPlayers){
       const p = this.worldPlayers[id]
       let inp = this.inputs[id] || { m:[0,0], a:[1,0], f:0 }
@@ -1595,7 +1594,6 @@ class GameScene extends Phaser.Scene {
       p.aimX = inp.a[0] || 1
       p.aimY = inp.a[1] || 0
 
-      /* Стрельба с бонусами */
       const rapid = (p.bonuses.rapidUntil || 0) > now
       const homingActive = (p.bonuses.homingUntil || 0) > now
       const ricochetActive = (p.bonuses.ricochetUntil || 0) > now
@@ -1612,7 +1610,6 @@ class GameScene extends Phaser.Scene {
         })
       }
 
-      /* Подбор ящиков */
       for (let i = this.pickups.length - 1; i >= 0; i--){
         const pk = this.pickups[i]
         const dx = p.x - pk.x, dy = p.y - pk.y
@@ -1624,17 +1621,14 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    /* Спавн ящиков */
     if (time - this.lastPickupSpawn > CFG.PICKUP_INTERVAL && this.pickups.length < CFG.PICKUP_MAX){
       this.lastPickupSpawn = time
       this.spawnPickup()
     }
 
-    /* Пули: движение, homing, рикошет, попадания */
     for (let i = this.bullets.length - 1; i >= 0; i--){
       const b = this.bullets[i]
 
-      /* Самонаведение с погрешностью */
       if (b.homing){
         let nearest = null, nd = Infinity
         for (const tid in this.worldPlayers){
@@ -1702,7 +1696,6 @@ class GameScene extends Phaser.Scene {
         continue
       }
 
-      /* Попадания */
       let hitSomeone = false
       for (const tid in this.worldPlayers){
         if (tid === b.owner) continue
@@ -1740,7 +1733,6 @@ class GameScene extends Phaser.Scene {
       if (hitSomeone) continue
     }
 
-    /* State */
     if (time - this.lastStateSent > CFG.STATE_MS){
       this.lastStateSent = time
 
@@ -1821,9 +1813,41 @@ class GameScene extends Phaser.Scene {
     this.spawnGhostBullet(payload)
   }
 
+  /* 🎯 Обновлённый метод: homing теперь работает и на клиенте */
   updateGhostBullets(time, dt){
     for (const id in this.ghostBullets){
       const g = this.ghostBullets[id]
+
+      /* Самонаведение — гнёт пулю к ближайшему врагу */
+      if (g.homing){
+        let nearest = null, nd = Infinity
+        for (const vid in this.views){
+          if (vid === this.myPeerId) continue
+          const v = this.views[vid]
+          if (!v || v.dead) continue
+          const dx = v.sprite.x - g.sprite.x
+          const dy = v.sprite.y - g.sprite.y
+          const d2 = dx*dx + dy*dy
+          if (d2 < nd){ nd = d2; nearest = v }
+        }
+        if (nearest){
+          const dx = nearest.sprite.x - g.sprite.x
+          const dy = nearest.sprite.y - g.sprite.y
+          const targetAngle = Math.atan2(dy, dx)
+          const curAngle = Math.atan2(g.vy, g.vx)
+          const noise = (Math.random() - 0.5) * CFG.BONUS_HOMING_NOISE
+          const wantAngle = targetAngle + noise
+          let diff = wantAngle - curAngle
+          while (diff > Math.PI) diff -= 2*Math.PI
+          while (diff < -Math.PI) diff += 2*Math.PI
+          const turn = Math.max(-CFG.BONUS_HOMING_TURN, Math.min(CFG.BONUS_HOMING_TURN, diff))
+          const speed = Math.hypot(g.vx, g.vy)
+          const newAngle = curAngle + turn
+          g.vx = Math.cos(newAngle) * speed
+          g.vy = Math.sin(newAngle) * speed
+        }
+      }
+
       let nx = g.sprite.x + g.vx*dt
       let ny = g.sprite.y + g.vy*dt
 
@@ -1911,7 +1935,6 @@ class GameScene extends Phaser.Scene {
       const vis = !v.dead
       v.sprite.setVisible(vis); v.bar.setVisible(vis)
 
-      /* Ободок щита */
       if (v.shield){
         let shields = 0
         if (id === this.myPeerId){
