@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+4<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -88,7 +88,7 @@
   <div id="hint">
     Левый стик — движение<br>
     Правый стик — прицел и огонь<br>
-    Бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💀 ваншот (независим)
+    Бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💀 ваншот
   </div>
   <div id="pid">…generating identity…</div>
 </div>
@@ -117,7 +117,6 @@ const CFG = {
   WALL_GLOW:  true,
   FLOOR_GLOW: true,
 
-  /* 🎁 Бонусы */
   PICKUP_INTERVAL:   5000,
   PICKUP_MAX:        6,
   PICKUP_RADIUS:     24,
@@ -134,8 +133,6 @@ const CFG = {
   SFX_MAX_DIST:      1400,
   SFX_MASTER:        0.55,
   AMBIENT_ENABLED:   true,
-
-  /* 🎵 Музыка */
   BGM_VOLUME:        0.35,
 }
 
@@ -154,7 +151,7 @@ const AC_CFG = {
 
 const APP_ID = 'p2p-shooter-identity-v1'
 const VOTE_DURATION_MS = 20000
-const RELAY_URL = 'wss://shoooterr.relaxdev.ru'
+const RELAY_URL = 'wss://shooterr.relaxdev.ru'
 
 /* ============================================================
    2. DEBUG
@@ -253,8 +250,14 @@ class SoundEngine {
 
     this.master.connect(comp); comp.connect(this.ctx.destination)
 
+    /* 🆕 Reverb подключён к master, чтобы эффект был слышен */
     this.reverb = this.ctx.createConvolver()
     this.reverb.buffer = this._makeIR(1.6, 2.4)
+    const reverbGain = this.ctx.createGain()
+    reverbGain.gain.value = 0.8
+    this.reverb.connect(reverbGain)
+    reverbGain.connect(this.master)
+
     this.noiseBuf = this._makeNoise(0.6)
 
     this.ready = true
@@ -291,7 +294,7 @@ class SoundEngine {
   setEnabled(v){
     this.enabled = !!v
     localStorage.setItem('sfx_enabled', this.enabled ? '1' : '0')
-    if (this.master){
+    if (this.master && this.ctx){
       const t = this.ctx.currentTime
       this.master.gain.cancelScheduledValues(t)
       this.master.gain.linearRampToValueAtTime(this.enabled ? CFG.SFX_MASTER : 0, t + 0.15)
@@ -468,67 +471,139 @@ class SoundEngine {
 }
 
 /* ============================================================
-   5. IDENTITY
+   5. IDENTITY — с таймаутом и fallback
    ============================================================ */
 class Identity {
   constructor(){
     this.ready=false; this.mode='none'; this.pubHash=null
     this.keyPair=null; this.pubJwk=null
   }
+
+  _timeout(promise, ms, label){
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout:' + (label || 'op'))), ms)
+      )
+    ])
+  }
+
+  _fallback(reason){
+    let stored = localStorage.getItem('p2p_fallback_id')
+    if (!stored){
+      stored = randomToken(12)
+      localStorage.setItem('p2p_fallback_id', stored)
+    }
+    this.pubHash = 'fb_' + stored
+    this.mode = 'fallback'
+    this.ready = true
+    DBG.warn('ID', 'fallback mode:', reason)
+  }
+
   async init(){
     if (!(window.isSecureContext && window.crypto && crypto.subtle)) {
-      let stored = localStorage.getItem('p2p_fallback_id')
-      if (!stored){ stored = randomToken(12); localStorage.setItem('p2p_fallback_id', stored) }
-      this.pubHash = 'fb_' + stored; this.mode = 'fallback'; this.ready = true
+      this._fallback('no secure context / no crypto.subtle')
       return
     }
+
     const storeKey = 'p2p_ecdsa_key'
     let stored = null
     try { stored = JSON.parse(localStorage.getItem(storeKey)) } catch {}
+
+    /* Битый ключ — стираем */
+    if (stored && (!stored.priv || !stored.pub)){
+      DBG.warn('ID', 'битый ключ в localStorage — сбрасываем')
+      try { localStorage.removeItem(storeKey) } catch {}
+      stored = null
+    }
+
     try {
-      if (stored && stored.priv && stored.pub) {
+      if (stored){
+        DBG.log('ID', 'восстанавливаем ключ из хранилища')
         this.keyPair = {
-          privateKey: await crypto.subtle.importKey('jwk', stored.priv,
-            {name:'ECDSA', namedCurve:'P-256'}, true, ['sign']),
-          publicKey: await crypto.subtle.importKey('jwk', stored.pub,
-            {name:'ECDSA', namedCurve:'P-256'}, true, ['verify']),
+          privateKey: await this._timeout(
+            crypto.subtle.importKey('jwk', stored.priv,
+              {name:'ECDSA', namedCurve:'P-256'}, true, ['sign']),
+            2000, 'importPriv'
+          ),
+          publicKey: await this._timeout(
+            crypto.subtle.importKey('jwk', stored.pub,
+              {name:'ECDSA', namedCurve:'P-256'}, true, ['verify']),
+            2000, 'importPub'
+          ),
         }
         this.pubJwk = stored.pub
       } else {
-        this.keyPair = await crypto.subtle.generateKey(
-          {name:'ECDSA', namedCurve:'P-256'}, true, ['sign','verify'])
-        this.pubJwk = await crypto.subtle.exportKey('jwk', this.keyPair.publicKey)
-        const privJwk = await crypto.subtle.exportKey('jwk', this.keyPair.privateKey)
-        localStorage.setItem(storeKey, JSON.stringify({priv: privJwk, pub: this.pubJwk}))
+        DBG.log('ID', 'генерируем новый ключ (таймаут 3с)')
+        this.keyPair = await this._timeout(
+          crypto.subtle.generateKey(
+            {name:'ECDSA', namedCurve:'P-256'}, true, ['sign','verify']),
+          3000, 'generateKey'
+        )
+        this.pubJwk = await this._timeout(
+          crypto.subtle.exportKey('jwk', this.keyPair.publicKey),
+          2000, 'exportPub'
+        )
+        const privJwk = await this._timeout(
+          crypto.subtle.exportKey('jwk', this.keyPair.privateKey),
+          2000, 'exportPriv'
+        )
+        try {
+          localStorage.setItem(storeKey, JSON.stringify({priv: privJwk, pub: this.pubJwk}))
+        } catch(e){ DBG.warn('ID', 'localStorage полон', e.message) }
       }
-      const hex = await this._sha256hex(JSON.stringify(this.pubJwk))
-      this.pubHash = hex.slice(0,16); this.mode = 'crypto'; this.ready = true
+
+      const hex = await this._timeout(
+        this._sha256hex(JSON.stringify(this.pubJwk)),
+        2000, 'sha256'
+      )
+      this.pubHash = hex.slice(0,16)
+      this.mode = 'crypto'
+      this.ready = true
+      DBG.log('ID', 'crypto mode ready', this.pubHash)
+
     } catch (e) {
-      let stored2 = localStorage.getItem('p2p_fallback_id') || randomToken(12)
-      localStorage.setItem('p2p_fallback_id', stored2)
-      this.pubHash = 'fb_' + stored2; this.mode = 'fallback'; this.ready = true
+      try { localStorage.removeItem(storeKey) } catch {}
+      this._fallback(e.message || String(e))
     }
   }
+
   async _sha256hex(str){
     const buf = new TextEncoder().encode(str)
     const h = await crypto.subtle.digest('SHA-256', buf)
     return Array.from(new Uint8Array(h), b => b.toString(16).padStart(2,'0')).join('')
   }
+
   async sign(str){
     if (this.mode !== 'crypto' || !crypto?.subtle) return 'no-crypto'
-    const buf = new TextEncoder().encode(str)
-    const sig = await crypto.subtle.sign({name:'ECDSA', hash:'SHA-256'}, this.keyPair.privateKey, buf)
-    return btoa(String.fromCharCode(...new Uint8Array(sig)))
+    try {
+      const buf = new TextEncoder().encode(str)
+      const sig = await this._timeout(
+        crypto.subtle.sign({name:'ECDSA', hash:'SHA-256'}, this.keyPair.privateKey, buf),
+        2000, 'sign'
+      )
+      return btoa(String.fromCharCode(...new Uint8Array(sig)))
+    } catch(e){
+      DBG.warn('ID', 'sign failed', e.message)
+      return 'no-crypto'
+    }
   }
+
   async verify(pubJwk, str, sigB64){
     if (this.mode !== 'crypto' || !crypto?.subtle) return false
     if (!pubJwk || !sigB64) return false
     try {
-      const pub = await crypto.subtle.importKey('jwk', pubJwk,
-        {name:'ECDSA', namedCurve:'P-256'}, true, ['verify'])
+      const pub = await this._timeout(
+        crypto.subtle.importKey('jwk', pubJwk,
+          {name:'ECDSA', namedCurve:'P-256'}, true, ['verify']),
+        2000, 'importVerify'
+      )
       const buf = new TextEncoder().encode(str)
       const sig = Uint8Array.from(atob(sigB64), c => c.charCodeAt(0))
-      return await crypto.subtle.verify({name:'ECDSA', hash:'SHA-256'}, pub, sig, buf)
+      return await this._timeout(
+        crypto.subtle.verify({name:'ECDSA', hash:'SHA-256'}, pub, sig, buf),
+        2000, 'verify'
+      )
     } catch { return false }
   }
 }
@@ -814,7 +889,7 @@ class BootScene extends Phaser.Scene {
     this.load.image('wall',   'wall.png')
     this.load.image('floor',  'floor.png')
 
-    /* 🎵 Фоновая музыка — попробуем загрузить оба формата */
+    /* 🎵 Фоновая музыка */
     this.load.audio('bgm', ['music.mp3', 'music.ogg'])
 
     this.load.on('loaderror', file => {
@@ -875,7 +950,7 @@ class GameScene extends Phaser.Scene {
     this.updateCameraZoom()
     this.scale.on('resize', () => this.updateCameraZoom())
 
-    /* 🎵 Фоновая музыка */
+    /* 🎵 Музыка */
     this._setupMusic()
 
     /* Состояние */
@@ -896,23 +971,19 @@ class GameScene extends Phaser.Scene {
     this._lastLocalShot = 0
     this._lastNameSent = 0
 
-    /* Ящики */
     this.pickups = []
     this.pickupSprites = {}
     this.pickupSeq = 0
     this.lastPickupSpawn = 0
 
-    /* Локальные бонусы: [rapidUntil, homingUntil, ricochetUntil, shieldHits, oneshotUntil] */
     this.localBonuses = [0, 0, 0, 0, 0]
 
-    /* Голосование */
     this.hostBlacklist = new Set()
     this.votes = new Map()
     this.voteActive = false
     this.voteTarget = null
     this.voteDeadline = 0
 
-    /* WebSocket */
     this.ws = null
     this.peers = new Set()
     this.isHost = false
@@ -921,15 +992,12 @@ class GameScene extends Phaser.Scene {
     this.serverHostId = null
     this.reconnectAttempts = 0
 
-    /* Локальное */
     this.local = { x:SPAWNS[0].x, y:SPAWNS[0].y, aimX:1, aimY:0, hp:CFG.MAX_HP, dead:false, score:0 }
     this.predicted = { x:this.local.x, y:this.local.y }
 
-    /* Античит */
     this.ac = new AntiCheat(this)
     this.ac.identity = this.identity
 
-    /* HUD */
     this.statusEl = document.getElementById('status')
     this.bonusesEl = document.getElementById('bonuses')
     this.scoresEl = document.getElementById('scores')
@@ -955,7 +1023,7 @@ class GameScene extends Phaser.Scene {
   _setupMusic(){
     try {
       if (!this.cache.audio.exists('bgm')){
-        DBG.warn('BGM', 'файл music.mp3 не найден — музыки не будет')
+        DBG.warn('BGM', 'music.mp3 не найден — музыки не будет')
         return
       }
       this.bgm = this.sound.add('bgm', {
@@ -970,8 +1038,9 @@ class GameScene extends Phaser.Scene {
         }
       }
 
-      /* Разблокировка звука после первого тапа */
-      if (this.sound.locked){
+      /* Phaser sound.locked: true если требуется user gesture */
+      const isLocked = this.sound && this.sound.locked
+      if (isLocked){
         this.sound.once('unlocked', tryPlay)
       } else {
         tryPlay()
@@ -986,13 +1055,11 @@ class GameScene extends Phaser.Scene {
   toggleSound(){
     this.sfx.setEnabled(!this.sfx.enabled)
     this.soundBtn.textContent = this.sfx.enabled ? '🔊' : '🔇'
-
-    /* 🎵 Синхронизация музыки с mute */
     if (this.bgm){
       try {
         if (this.sfx.enabled){
           if (!this.bgm.isPlaying) this.bgm.play()
-          this.bgm.setVolume(CFG.BGM_VOLUME)
+          if (typeof this.bgm.setVolume === 'function') this.bgm.setVolume(CFG.BGM_VOLUME)
         } else {
           this.bgm.pause()
         }
@@ -1047,9 +1114,6 @@ class GameScene extends Phaser.Scene {
     return { pan, vol }
   }
 
-  /* ============================================================
-     🎁 ЛОГИКА БОНУСОВ
-     ============================================================ */
   _computeFireBehavior(bonuses, now){
     const rapid = bonuses[0] > now
     const homing = bonuses[1] > now
@@ -1242,7 +1306,6 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  /* =========== HANDLERS =========== */
   onNetInput(data, fromId){
     if (!this.isHost) return
     if (this.ac.bans.has(fromId)) return
@@ -1368,7 +1431,6 @@ class GameScene extends Phaser.Scene {
     if (this.voteTarget === id) this.endVote()
   }
 
-  /* =========== HOST =========== */
   currentHostId(){ return this.isHost ? this.myPeerId : this.serverHostId }
 
   isInsideWall(x, y, r){
@@ -1513,7 +1575,6 @@ class GameScene extends Phaser.Scene {
     this.updateStatus()
   }
 
-  /* =========== VOTE =========== */
   onVoteClick(){
     const hostId = this.currentHostId()
     if (!hostId || hostId === this.myPeerId){ acLog('✖ ты хост'); return }
@@ -1569,7 +1630,6 @@ class GameScene extends Phaser.Scene {
     this.voteBtn.classList.toggle('armed', this.votes.has(this.myPeerId))
   }
 
-  /* =========== STATUS =========== */
   updateStatus(){
     if (!this.statusEl) return
     const n = this.peers.size + (this.myPeerId ? 1 : 0)
@@ -1632,7 +1692,6 @@ class GameScene extends Phaser.Scene {
     this.scoresEl.innerHTML = html
   }
 
-  /* =========== STATE =========== */
   applyState(data){
     if (!data || !data.p) return
     if (data.names){
@@ -1767,7 +1826,6 @@ class GameScene extends Phaser.Scene {
     if (byMe) this.cameras.main.shake(50, 0.002)
   }
 
-  /* =========== VIEWS =========== */
   createView(id){
     if (this.views[id]) return this.views[id]
     const sprite = this.add.image(0, 0, 'player')
@@ -1780,24 +1838,22 @@ class GameScene extends Phaser.Scene {
     const shield = this.add.circle(0, 0, CFG.PLAYER_W * 0.6, 0x66ccff, 0.25)
       .setDepth(9).setVisible(false)
     this.views[id] = { sprite, bar, label, shield, hp:CFG.MAX_HP, dead:false,
-                       tx:0, ty:0, ta:0,.pickups.length init:false <, buffer:[] }
-    return this.views CF[id]
+                       tx:0, ty:0, ta:0, init:false, buffer:[] }
+    return this.views[id]
   }
-  destroyGView(id){
-    const v.P = this.views[id];ICK if (!v) return
-    v.sUPprite.destroy()
-    v.bar.d_MAXestroy()
+  destroyView(id){
+    const v = this.views[id]; if (!v) return
+    v.sprite.destroy()
+    v.bar.destroy()
     if (v.label) v.label.destroy()
     if (v.shield) v.shield.destroy()
     delete this.views[id]
   }
 
-  /*){
-      this =========== UPDATE.last =========== */
-  update(timePick, delta){
-    const dt =up Math.min(delta, 50) / S1000
+  update(time, delta){
+    const dt = Math.min(delta, 50) / 1000
 
-    if (pawntime - this.lastAcTick > 250){
+    if (time - this.lastAcTick > 250){
       const dtAc = (time - this.lastAcTick) / 1000
       this.lastAcTick = time
       this.ac.tick(dtAc)
@@ -1858,7 +1914,6 @@ class GameScene extends Phaser.Scene {
       this.simulateHost(time, dt)
     }
 
-    /* Локальное предсказание пуль */
     if (!this.isHost && !this.local.dead){
       const now = performance.now()
       const behavior = this._computeFireBehavior(this.localBonuses, now)
@@ -1903,7 +1958,6 @@ class GameScene extends Phaser.Scene {
     return { x, y }
   }
 
-  /* =========== HOST SIM =========== */
   simulateHost(time, dt){
     const now = performance.now()
 
@@ -1972,7 +2026,8 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    if (time - this.lastPickupSpawn > CFG.PICKUP_INTERVAL && this = time
+    if (time - this.lastPickupSpawn > CFG.PICKUP_INTERVAL && this.pickups.length < CFG.PICKUP_MAX){
+      this.lastPickupSpawn = time
       this.spawnPickup()
     }
 
@@ -2128,40 +2183,40 @@ class GameScene extends Phaser.Scene {
             [
               Math.max(0, Math.round((bn.rapidUntil||0) - now)),
               Math.max(0, Math.round((bn.homingUntil||0) - now)),
-              Math b.max(0, Math.round((bn.ricoc.hetUntil||0) - now)),
-              bn.shvyieldHits ||, 0,
-              Math.max(0, owner Math.round((bn.oneshotUntil||0:) - now)),
+              Math.max(0, Math.round((bn.ricochetUntil||0) - now)),
+              bn.shieldHits || 0,
+              Math.max(0, Math.round((bn.oneshotUntil||0) - now)),
             ],
-          owner ]
+          ]
         }
-        const payload = { p:Id pack, scores, names, pickups }
-,
-        if (peerId === this.my     PeerId) this.applyState(payload hom)
-        else this.sendState(payloading, peerId)
+        const payload = { p: pack, scores, names, pickups }
+        if (peerId === this.myPeerId) this.applyState(payload)
+        else this.sendState(payload, peerId)
       }
-   : }
+    }
   }
 
-  hostSpawnBul blet(ownerId, x, y.h, ax, ay, opts){
-oming    opts = opts || {}
-    const len, = Math.hypot(ax, ay) || ric 1
-    const id = this.myPeerIdoc + '-' + (++this.bulletSeqhet)
+  hostSpawnBullet(ownerId, x, y, ax, ay, opts){
+    opts = opts || {}
+    const len = Math.hypot(ax, ay) || 1
+    const id = this.myPeerId + '-' + (++this.bulletSeq)
     const b = {
       id,
-     : x: x + (ax/len)*(CFG b.PLAYER_R+6),
-     .b y: y + (ouncesay/len)*(CFG.PLAYLeftER_R+6),
-      vx:, (ax/len)*CFG.BULLET ones_SPEED,
-      vy:hot (ay/len)*CFG.BULL:ET_SPEED,
-      owner: ownerId b, born: this.time.now,
-      hom.ing: !!opts.homing,
-      bonesouncesLeft: opts.ricochet || hot,
+      x: x + (ax/len)*(CFG.PLAYER_R+6),
+      y: y + (ay/len)*(CFG.PLAYER_R+6),
+      vx: (ax/len)*CFG.BULLET_SPEED,
+      vy: (ay/len)*CFG.BULLET_SPEED,
+      owner: ownerId, born: this.time.now,
+      homing: !!opts.homing,
+      bouncesLeft: opts.ricochet || 0,
+      oneshot: !!opts.oneshot,
     }
-    this.sendBul0,
-      oneshotlet: !!opts.oneshot,
-    }
-(p    this.bullets.push(b)
+    this.bullets.push(b)
     const payload = {
-      id: b.id, x: b.x, y: b.y, vx: b.vx, vy:ayload)
+      id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, owner: ownerId,
+      homing: b.homing, ricochet: b.bouncesLeft, oneshot: b.oneshot,
+    }
+    this.sendBullet(payload)
     this.spawnGhostBullet(payload)
   }
 
@@ -2320,7 +2375,6 @@ oming    opts = opts || {}
     if (me) this.cameras.main.centerOn(me.sprite.x, me.sprite.y)
   }
 
-  /* =========== BAN =========== */
   onAntiCheatBan(id, reason, persistent){
     if (reason === 'timeout' || reason === 'idle') return
     if (this.ac.bans.has(id) && !persistent) return
@@ -2342,24 +2396,59 @@ oming    opts = opts || {}
 }
 
 /* ============================================================
-   11. СТАРТ
+   11. СТАРТ — с внешним таймаутом
    ============================================================ */
 ;(async ()=>{
   const identity = new Identity()
-  await identity.init()
-  document.getElementById('pid').textContent =
-    `identity: ${identity.mode} · id: ${identity.pubHash}`
 
+  /* 🆕 Инициализация identity с внешним таймаутом 4с,
+     чтобы игра запустилась, даже если WebCrypto завис */
+  try {
+    await Promise.race([
+      identity.init(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('identity outer timeout')), 4000)
+      )
+    ])
+  } catch(e){
+    DBG.warn('BOOT', 'identity init outer timeout/fail:', e.message)
+    if (!identity.ready){
+      let stored = localStorage.getItem('p2p_fallback_id')
+      if (!stored){
+        stored = randomToken(12)
+        localStorage.setItem('p2p_fallback_id', stored)
+      }
+      identity.pubHash = 'fb_' + stored
+      identity.mode = 'fallback'
+      identity.ready = true
+    }
+  }
+
+  /* Отображаем результат identity */
+  try {
+    document.getElementById('pid').textContent =
+      `identity: ${identity.mode} · id: ${identity.pubHash}`
+  } catch(e){}
+
+  DBG.log('BOOT', 'identity ready:', identity.mode)
+
+  /* Sound engine */
   const sfx = new SoundEngine()
 
+  /* Обработчик кнопки ИГРАТЬ */
   document.getElementById('playBtn').addEventListener('click', ()=>{
     const code = (document.getElementById('roomInput').value || 'arena1').trim()
     const rawName = (document.getElementById('nameInput').value || '').trim()
     const name = cleanName(rawName) || ('Player' + Math.floor(Math.random()*999))
+    DBG.log('BOOT', 'starting with room:', JSON.stringify(code), 'name:', name)
     document.getElementById('menu').style.display = 'none'
 
-    sfx.init()
-    sfx.startAmbient()
+    try {
+      sfx.init()
+      sfx.startAmbient()
+    } catch(e){
+      DBG.warn('BOOT', 'sfx init failed', e)
+    }
 
     new Phaser.Game({
       type: Phaser.AUTO,
@@ -2379,7 +2468,9 @@ oming    opts = opts || {}
       },
     })
   })
+
+  DBG.log('BOOT', 'play button ready')
 })()
 </script>
 </body>
-</html>
+  </html>
