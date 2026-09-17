@@ -49,6 +49,7 @@
   #menu input{padding:12px 16px;font-size:clamp(14px,2.2vmin,18px);border-radius:8px;
               border:1px solid #30363d;background:#161b22;color:#e6edf3;
               width:220px;text-align:center;font-family:monospace;}
+  #menu input:focus{outline:none;border-color:#1133ff;box-shadow:0 0 10px #1133ff55;}
   #menu button{padding:14px 34px;font-size:clamp(14px,2.2vmin,18px);border-radius:8px;border:0;
                background:#1133ff;color:#fff;font-family:monospace;font-weight:bold;
                box-shadow:0 0 14px #1133ff;}
@@ -68,12 +69,13 @@
 
 <div id="menu">
   <h1>Shoot'n'cats</h1>
+  <input id="nameInput" placeholder="твоё имя" value="" maxlength="14" />
   <input id="roomInput" placeholder="код комнаты" value="arena1" />
   <button id="playBtn">ИГРАТЬ</button>
   <div id="hint">
     Левый стик — движение<br>
     Правый стик — прицел и огонь<br>
-    Можно играть вдвоем, втроем и даже в четвером!
+    Если ты тюлень то тебе сюда
   </div>
   <div id="pid">…generating identity…</div>
 </div>
@@ -89,7 +91,7 @@ const CFG = {
   W: 1800, H: 1200, CELL: 40,
   PLAYER_R: 18, SPEED: 240,
   BULLET_SPEED: 780, BULLET_R: 5, BULLET_LIFE: 1.4,
-  FIRE_CD: 500, MAX_HP: 100, DAMAGE: 25, RESPAWN: 2500,
+  FIRE_CD: 150, MAX_HP: 100, DAMAGE: 25, RESPAWN: 2500,
   STATE_MS: 100, INPUT_MS: 66,
 
   /* 📐 Размеры спрайтов на экране */
@@ -97,8 +99,8 @@ const CFG = {
   BULLET_SIZE: 14,
 
   /* 🌈 Неоновые цвета стен и пола */
-  WALL_COLOR:  0xff2266,   // красный
-  FLOOR_COLOR: 0x1133ff,   // синий
+  WALL_COLOR:  0xff2266,
+  FLOOR_COLOR: 0x1133ff,
   FLOOR_TINT_ALPHA: 1.0,
 
   /* ✨ Свечение */
@@ -161,6 +163,7 @@ function clamp(v,a,b){return v<a?a:v>b?b:v}
 function fnv1a(str){let h=2166136261>>>0;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)}return(h>>>0).toString(36)}
 function randomToken(len=24){const b=new Uint8Array(len);crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,'0')).join('')}
 function safePeerId(s){ return String(s).replace(/[^A-Za-z0-9_-]/g,'_').slice(0,60) }
+function cleanName(s){ return String(s||'').replace(/[<>&"']/g,'').trim().slice(0,14) }
 
 function resolveCircleRect(px,py,r,rect){
   const cx=clamp(px,rect.x,rect.x+rect.w), cy=clamp(py,rect.y,rect.y+rect.h)
@@ -612,7 +615,7 @@ function generateWalls(seedStr){
 }
 
 /* ============================================================
-   8. BOOT SCENE — загрузка PNG с fallback-заглушками
+   8. BOOT SCENE
    ============================================================ */
 class BootScene extends Phaser.Scene {
   constructor(){ super('Boot') }
@@ -623,7 +626,6 @@ class BootScene extends Phaser.Scene {
     this.load.image('wall',   'wall.png')
     this.load.image('floor',  'floor.png')
 
-    /* Если PNG нет — сгенерируем заглушку, игра не упадёт */
     this.load.on('loaderror', file => {
       DBG.warn('BOOT', 'not found, generating stub:', file.key)
       this.generateStub(file.key)
@@ -663,10 +665,11 @@ class GameScene extends Phaser.Scene {
   create(){
     this.roomId = this.registry.get('roomId') || 'arena1'
     this.identity = this.registry.get('identity')
+    this.myName = this.registry.get('playerName') || 'anon'
 
-    DBG.log('GAME', 'scene created', { roomId: this.roomId })
+    DBG.log('GAME', 'scene created', { roomId: this.roomId, name: this.myName })
 
-    /* ---------- ПОЛ (неоново-синий) ---------- */
+    /* ---------- ПОЛ ---------- */
     this.floorSprite = this.add.tileSprite(0, 0, CFG.W, CFG.H, 'floor')
       .setOrigin(0)
       .setDepth(-20)
@@ -674,17 +677,15 @@ class GameScene extends Phaser.Scene {
       .setAlpha(CFG.FLOOR_TINT_ALPHA)
 
     if (CFG.FLOOR_GLOW){
-      /* Мягкое свечение поверх пола */
       this.add.rectangle(CFG.W/2, CFG.H/2, CFG.W, CFG.H, CFG.FLOOR_COLOR, 0.12)
         .setBlendMode(Phaser.BlendModes.ADD)
         .setDepth(-19)
     }
 
-    /* ---------- СТЕНЫ (неоново-красные) ---------- */
+    /* ---------- СТЕНЫ ---------- */
     this.wallRects = generateWalls(this.roomId)
     this.wallSprites = []
 
-    /* Слой свечения вокруг стен (под ними) */
     if (CFG.WALL_GLOW){
       for (const r of this.wallRects){
         this.add.image(r.x + r.w/2, r.y + r.h/2, 'wall')
@@ -696,7 +697,6 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    /* Основные стены */
     for (const r of this.wallRects){
       const wall = this.add.image(r.x, r.y, 'wall')
         .setOrigin(0)
@@ -727,6 +727,7 @@ class GameScene extends Phaser.Scene {
     this._lastVisibleCalc = 0
     this._visibleCache = {}
     this.scores = {}
+    this.peerNames = {}          /* 🆕 peerId -> name */
     this._lastLocalShot = 0
 
     /* голосование */
@@ -764,6 +765,7 @@ class GameScene extends Phaser.Scene {
     this.setupJoysticks()
 
     this.myPeerId = 'local_' + randomToken(4)
+    this.peerNames[this.myPeerId] = this.myName
     this.createView(this.myPeerId)
 
     this.setupNetwork()
@@ -845,6 +847,7 @@ class GameScene extends Phaser.Scene {
         ok ? '#3fb950' : '#f85149'
       )
       DBG.log('DIAG', 'myPeerId   :', this.myPeerId)
+      DBG.log('DIAG', 'myName     :', this.myName)
       DBG.log('DIAG', 'serverHost :', this.serverHostId)
       DBG.log('DIAG', 'ws state   :', this.ws ? this.ws.readyState : 'no ws')
       DBG.log('DIAG', 'peers      :', [...this.peers])
@@ -899,7 +902,12 @@ class GameScene extends Phaser.Scene {
           DBG.log('NET', 'I AM HOST (server assigned)')
           this.isHost = true
           this.hasBecomeClient = false
-          this.sendId({ pubHash: this.identity.pubHash, mode: this.identity.mode }, this.myPeerId)
+          this.peerNames[this.myPeerId] = this.myName
+          this.sendId({
+            pubHash: this.identity.pubHash,
+            mode: this.identity.mode,
+            name: this.myName,
+          }, this.myPeerId)
           this.becomeHost()
           DBG.banner('YOU ARE HOST', '#ff2266')
         } else {
@@ -915,8 +923,14 @@ class GameScene extends Phaser.Scene {
             DBG.log('NET', 'added existing peer:', peerId)
           }
 
+          this.peerNames[this.myPeerId] = this.myName
+
           if (msg.host){
-            this.sendId({ pubHash: this.identity.pubHash, mode: this.identity.mode }, msg.host)
+            this.sendId({
+              pubHash: this.identity.pubHash,
+              mode: this.identity.mode,
+              name: this.myName,
+            }, msg.host)
             this.sendTok({ request: true }, msg.host)
             this.sendId({ challenge: 'hello-from-' + this.myPeerId }, msg.host)
           }
@@ -993,6 +1007,8 @@ class GameScene extends Phaser.Scene {
     const oldId = this.myPeerId
     if (oldId === newId) return
     DBG.log('NET', 'my id:', oldId?.slice(0,12) || '?', '→', newId.slice(0,12))
+
+    /* Переносим view */
     const v = this.views[oldId]
     if (v){
       this.views[newId] = v
@@ -1001,6 +1017,14 @@ class GameScene extends Phaser.Scene {
     } else {
       DBG.warn('NET', 'no view found for old id', oldId)
     }
+
+    /* Переносим имя */
+    if (this.peerNames[oldId]){
+      this.peerNames[newId] = this.peerNames[oldId]
+      delete this.peerNames[oldId]
+    }
+    this.peerNames[newId] = this.myName
+
     this.myPeerId = newId
     this.updateStatus()
   }
@@ -1088,6 +1112,19 @@ class GameScene extends Phaser.Scene {
     }
   }
   async onNetIdentity(data, fromId){
+    /* 🆕 Обрабатываем имя сразу */
+    if (data.name){
+      const n = cleanName(data.name)
+      if (n){
+        this.peerNames[fromId] = n
+        DBG.log('NAME', fromId.slice(0,8), '→', n)
+        /* Обновляем текст над спрайтом */
+        const v = this.views[fromId]
+        if (v && v.label) v.label.setText(n)
+        this.renderScores()
+      }
+    }
+
     if (data.challenge){
       const sig = await this.identity.sign(data.challenge)
       this.sendId({
@@ -1095,6 +1132,7 @@ class GameScene extends Phaser.Scene {
         pubHash: this.identity.pubHash,
         sig,
         mode: this.identity.mode,
+        name: this.myName,
       }, fromId)
     } else if (data.pubHash){
       if (!this.isHost) return
@@ -1131,6 +1169,7 @@ class GameScene extends Phaser.Scene {
     delete this.inputs[id]
     delete this.worldPlayers[id]
     delete this.scores[id]
+    delete this.peerNames[id]
     this.destroyView(id)
     this.ac.remove(id)
     this.votes.delete(id)
@@ -1313,8 +1352,8 @@ class GameScene extends Phaser.Scene {
     const n = this.peers.size + (this.myPeerId ? 1 : 0)
     const role = this.isHost ? 'HOST' : (this.hasBecomeClient ? 'CLIENT' : 'WAIT')
     const hp = Math.max(0, Math.round(this.local.hp))
-    const pid = (this.identity?.pubHash || '?').slice(0,8)
     const sc = this.local.score || 0
+    const myName = this.peerNames[this.myPeerId] || this.myName || '?'
 
     let ping = 0
     for (const [, p] of this.ac.peers){
@@ -1323,7 +1362,7 @@ class GameScene extends Phaser.Scene {
     }
     ping = Math.round(ping)
 
-    this.statusEl.textContent = `${role} · ${this.roomId} · игроков: ${n} · HP: ${hp} · очки: ${sc} · ping: ${ping}ms`
+    this.statusEl.textContent = `${role} · ${myName} · ${this.roomId} · игроков: ${n} · HP: ${hp} · очки: ${sc} · ping: ${ping}ms`
   }
 
   renderScores(){
@@ -1349,7 +1388,8 @@ class GameScene extends Phaser.Scene {
       const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  '
       const tag = r.isMe ? ' (я)' : ''
       const cls = r.isMe ? 'me' : (r.dead ? 'dead' : '')
-      html += `<span class="${cls}">${medal} ${r.id.slice(0,6)}${tag} · ${r.score}</span>\n`
+      const name = this.peerNames[r.id] || r.id.slice(0, 6)
+      html += `<span class="${cls}">${medal} ${name}${tag} · ${r.score}</span>\n`
     }
     this.scoresEl.innerHTML = html
   }
@@ -1357,6 +1397,14 @@ class GameScene extends Phaser.Scene {
   /* =========== STATE =========== */
   applyState(data){
     if (!data || !data.p) return
+
+    /* 🆕 Имена от хоста */
+    if (data.names){
+      for (const id in data.names){
+        const n = cleanName(data.names[id])
+        if (n) this.peerNames[id] = n
+      }
+    }
 
     if (data.scores){
       this.scores = data.scores
@@ -1429,12 +1477,23 @@ class GameScene extends Phaser.Scene {
       .setDepth(10)
       .setTint(colorFromId(id))
     const bar = this.add.graphics().setDepth(11)
-    this.views[id] = { sprite, bar, hp:CFG.MAX_HP, dead:false, tx:0, ty:0, ta:0, init:false, buffer:[] }
+    /* 🆕 Имя над игроком */
+    const label = this.add.text(0, 0, this.peerNames[id] || id.slice(0, 6), {
+      fontFamily: 'monospace',
+      fontSize: '11px',
+      color: '#e6edf3',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(12)
+    this.views[id] = { sprite, bar, label, hp:CFG.MAX_HP, dead:false, tx:0, ty:0, ta:0, init:false, buffer:[] }
     return this.views[id]
   }
   destroyView(id){
     const v = this.views[id]; if (!v) return
-    v.sprite.destroy(); v.bar.destroy(); delete this.views[id]
+    v.sprite.destroy()
+    v.bar.destroy()
+    if (v.label) v.label.destroy()
+    delete this.views[id]
   }
 
   /* =========== UPDATE =========== */
@@ -1622,6 +1681,13 @@ class GameScene extends Phaser.Scene {
         scores[id] = Math.round(this.worldPlayers[id].score || 0)
       }
 
+      /* 🆕 Таблица имён */
+      const names = {}
+      for (const id in this.peerNames){
+        names[id] = this.peerNames[id]
+      }
+      names[this.myPeerId] = this.myName
+
       for (const peerId of [this.myPeerId, ...this.peers]){
         if (this.ac.bans.has(peerId)) continue
         const visible = this._visibleCache[peerId]
@@ -1636,7 +1702,7 @@ class GameScene extends Phaser.Scene {
             Math.round(w.hp), w.dead ? 1 : 0,
           ]
         }
-        const payload = { p: pack, scores }
+        const payload = { p: pack, scores, names }
         if (peerId === this.myPeerId) this.applyState(payload)
         else this.sendState(payload, peerId)
       }
@@ -1722,6 +1788,16 @@ class GameScene extends Phaser.Scene {
         v.bar.fillStyle(0x000000, 0.6); v.bar.fillRect(bx-1, by-1, 42, 7)
         v.bar.fillStyle(v.hp>50?0x3fb950:v.hp>25?0xd29922:0xf85149, 1)
         v.bar.fillRect(bx, by, w, 5)
+
+        /* 🆕 Позиция имени над головой */
+        if (v.label){
+          const currentName = this.peerNames[id] || id.slice(0, 6)
+          if (v.label.text !== currentName) v.label.setText(currentName)
+          v.label.setPosition(v.sprite.x, v.sprite.y - 40)
+          v.label.setVisible(true)
+        }
+      } else {
+        if (v.label) v.label.setVisible(false)
       }
     }
     const me = this.views[this.myPeerId]
@@ -1763,7 +1839,9 @@ class GameScene extends Phaser.Scene {
 
   document.getElementById('playBtn').addEventListener('click', ()=>{
     const code = (document.getElementById('roomInput').value || 'arena1').trim()
-    DBG.log('BOOT', 'starting with room:', JSON.stringify(code))
+    const rawName = (document.getElementById('nameInput').value || '').trim()
+    const name = cleanName(rawName) || ('Player' + Math.floor(Math.random()*999))
+    DBG.log('BOOT', 'starting with room:', JSON.stringify(code), 'name:', name)
     document.getElementById('menu').style.display = 'none'
 
     new Phaser.Game({
@@ -1778,6 +1856,7 @@ class GameScene extends Phaser.Scene {
         preBoot: (game)=>{
           game.registry.set('roomId', code)
           game.registry.set('identity', identity)
+          game.registry.set('playerName', name)
         }
       },
     })
