@@ -123,17 +123,20 @@ const CFG = {
   PICKUP_RADIUS:     24,
   BONUS_DURATION:    20000,
   BONUS_HP_AMOUNT:   40,
-  BONUS_FIRE_MUL:    0.5,      // ⚡ rapid: во сколько раз быстрее стрельба
+  BONUS_FIRE_MUL:    0.5,
   BONUS_HOMING_TURN: 0.12,
   BONUS_HOMING_NOISE: 0.4,
   BONUS_RICOCHET_MAX: 2,
-  BONUS_HOMING_FIRE_CD: 2000,   // 🎯 самонаведение: раз в 2 сек
-  BONUS_ONESHOT_FIRE_CD: 5000,  // 💀 ваншот: раз в 5 сек
-  BONUS_ONESHOT_DAMAGE: 999,    // 💀 ваншот: 1 удар = смерть
+  BONUS_HOMING_FIRE_CD: 2000,
+  BONUS_ONESHOT_FIRE_CD: 5000,
+  BONUS_ONESHOT_DAMAGE: 999,
 
   SFX_MAX_DIST:      1400,
   SFX_MASTER:        0.55,
   AMBIENT_ENABLED:   true,
+
+  /* 🎵 Музыка */
+  BGM_VOLUME:        0.35,
 }
 
 const AC_CFG = {
@@ -151,7 +154,7 @@ const AC_CFG = {
 
 const APP_ID = 'p2p-shooter-identity-v1'
 const VOTE_DURATION_MS = 20000
-const RELAY_URL = 'wss://shoooterr.relaxdev.ru'
+const RELAY_URL = 'wss://shooterr.relaxdev.ru'
 
 /* ============================================================
    2. DEBUG
@@ -810,7 +813,14 @@ class BootScene extends Phaser.Scene {
     this.load.image('bullet', 'bullet.png')
     this.load.image('wall',   'wall.png')
     this.load.image('floor',  'floor.png')
-    this.load.on('loaderror', file => this.generateStub(file.key))
+
+    /* 🎵 Фоновая музыка — попробуем загрузить оба формата */
+    this.load.audio('bgm', ['music.mp3', 'music.ogg'])
+
+    this.load.on('loaderror', file => {
+      DBG.warn('BOOT', 'not found:', file.key)
+      if (file.key !== 'bgm') this.generateStub(file.key)
+    })
   }
   generateStub(key){
     if (this.textures.exists(key)) return
@@ -864,6 +874,9 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#05070d')
     this.updateCameraZoom()
     this.scale.on('resize', () => this.updateCameraZoom())
+
+    /* 🎵 Фоновая музыка */
+    this._setupMusic()
 
     /* Состояние */
     this.views = {}
@@ -927,10 +940,7 @@ class GameScene extends Phaser.Scene {
     this.soundBtn.style.display = ''
     this.soundBtn.textContent = this.sfx.enabled ? '🔊' : '🔇'
     this.voteBtn.addEventListener('click', ()=> this.onVoteClick())
-    this.soundBtn.addEventListener('click', ()=>{
-      this.sfx.setEnabled(!this.sfx.enabled)
-      this.soundBtn.textContent = this.sfx.enabled ? '🔊' : '🔇'
-    })
+    this.soundBtn.addEventListener('click', ()=> this.toggleSound())
 
     this.setupJoysticks()
 
@@ -939,6 +949,55 @@ class GameScene extends Phaser.Scene {
     this.createView(this.myPeerId)
 
     this.setupNetwork()
+  }
+
+  /* =========== 🎵 МУЗЫКА =========== */
+  _setupMusic(){
+    try {
+      if (!this.cache.audio.exists('bgm')){
+        DBG.warn('BGM', 'файл music.mp3 не найден — музыки не будет')
+        return
+      }
+      this.bgm = this.sound.add('bgm', {
+        loop: true,
+        volume: CFG.BGM_VOLUME,
+      })
+
+      const tryPlay = () => {
+        if (!this.sfx.enabled) return
+        if (this.bgm && !this.bgm.isPlaying){
+          try { this.bgm.play() } catch(e){}
+        }
+      }
+
+      /* Разблокировка звука после первого тапа */
+      if (this.sound.locked){
+        this.sound.once('unlocked', tryPlay)
+      } else {
+        tryPlay()
+      }
+
+      DBG.log('BGM', 'музыка загружена')
+    } catch(e){
+      DBG.warn('BGM', 'ошибка инициализации:', e)
+    }
+  }
+
+  toggleSound(){
+    this.sfx.setEnabled(!this.sfx.enabled)
+    this.soundBtn.textContent = this.sfx.enabled ? '🔊' : '🔇'
+
+    /* 🎵 Синхронизация музыки с mute */
+    if (this.bgm){
+      try {
+        if (this.sfx.enabled){
+          if (!this.bgm.isPlaying) this.bgm.play()
+          this.bgm.setVolume(CFG.BGM_VOLUME)
+        } else {
+          this.bgm.pause()
+        }
+      } catch(e){ DBG.warn('BGM', 'toggle error:', e) }
+    }
   }
 
   updateCameraZoom(){
@@ -990,15 +1049,6 @@ class GameScene extends Phaser.Scene {
 
   /* ============================================================
      🎁 ЛОГИКА БОНУСОВ
-
-     oneshot — отдельный бонус, не зависит от остальных:
-       пока активен: стрельба ТОЛЬКО ваншот-пулями с CD 5 сек,
-       rapid/homing/ricochet игнорируются.
-
-     rapid + homing/ricochet — работают вместе.
-     homing задаёт минимум CD 2 сек.
-     rapid уменьшает CD.
-     ricochet — флаг пули.
      ============================================================ */
   _computeFireBehavior(bonuses, now){
     const rapid = bonuses[0] > now
@@ -1542,7 +1592,6 @@ class GameScene extends Phaser.Scene {
     const now = performance.now()
     const parts = []
     if (bn[4] > now){
-      /* oneshot — приоритетный индикатор */
       parts.push(`💀 ${Math.ceil((bn[4]-now)/1000)}s`)
     } else {
       if (bn[0] > now) parts.push(`⚡ ${Math.ceil((bn[0]-now)/1000)}s`)
@@ -1731,23 +1780,24 @@ class GameScene extends Phaser.Scene {
     const shield = this.add.circle(0, 0, CFG.PLAYER_W * 0.6, 0x66ccff, 0.25)
       .setDepth(9).setVisible(false)
     this.views[id] = { sprite, bar, label, shield, hp:CFG.MAX_HP, dead:false,
-                       tx:0, ty:0, ta:0, init:false, buffer:[] }
-    return this.views[id]
+                       tx:0, ty:0, ta:0,.pickups.length init:false <, buffer:[] }
+    return this.views CF[id]
   }
-  destroyView(id){
-    const v = this.views[id]; if (!v) return
-    v.sprite.destroy()
-    v.bar.destroy()
+  destroyGView(id){
+    const v.P = this.views[id];ICK if (!v) return
+    v.sUPprite.destroy()
+    v.bar.d_MAXestroy()
     if (v.label) v.label.destroy()
     if (v.shield) v.shield.destroy()
     delete this.views[id]
   }
 
-  /* =========== UPDATE =========== */
-  update(time, delta){
-    const dt = Math.min(delta, 50) / 1000
+  /*){
+      this =========== UPDATE.last =========== */
+  update(timePick, delta){
+    const dt =up Math.min(delta, 50) / S1000
 
-    if (time - this.lastAcTick > 250){
+    if (pawntime - this.lastAcTick > 250){
       const dtAc = (time - this.lastAcTick) / 1000
       this.lastAcTick = time
       this.ac.tick(dtAc)
@@ -1886,7 +1936,6 @@ class GameScene extends Phaser.Scene {
       p.aimX = inp.a[0] || 1
       p.aimY = inp.a[1] || 0
 
-      /* Единая функция вычисления поведения стрельбы */
       const bnArr = [
         p.bonuses.rapidUntil || 0,
         p.bonuses.homingUntil || 0,
@@ -1923,8 +1972,7 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    if (time - this.lastPickupSpawn > CFG.PICKUP_INTERVAL && this.pickups.length < CFG.PICKUP_MAX){
-      this.lastPickupSpawn = time
+    if (time - this.lastPickupSpawn > CFG.PICKUP_INTERVAL && this = time
       this.spawnPickup()
     }
 
@@ -2080,40 +2128,40 @@ class GameScene extends Phaser.Scene {
             [
               Math.max(0, Math.round((bn.rapidUntil||0) - now)),
               Math.max(0, Math.round((bn.homingUntil||0) - now)),
-              Math.max(0, Math.round((bn.ricochetUntil||0) - now)),
-              bn.shieldHits || 0,
-              Math.max(0, Math.round((bn.oneshotUntil||0) - now)),
+              Math b.max(0, Math.round((bn.ricoc.hetUntil||0) - now)),
+              bn.shvyieldHits ||, 0,
+              Math.max(0, owner Math.round((bn.oneshotUntil||0:) - now)),
             ],
-          ]
+          owner ]
         }
-        const payload = { p: pack, scores, names, pickups }
-        if (peerId === this.myPeerId) this.applyState(payload)
-        else this.sendState(payload, peerId)
+        const payload = { p:Id pack, scores, names, pickups }
+,
+        if (peerId === this.my     PeerId) this.applyState(payload hom)
+        else this.sendState(payloading, peerId)
       }
-    }
+   : }
   }
 
-  hostSpawnBullet(ownerId, x, y, ax, ay, opts){
-    opts = opts || {}
-    const len = Math.hypot(ax, ay) || 1
-    const id = this.myPeerId + '-' + (++this.bulletSeq)
+  hostSpawnBul blet(ownerId, x, y.h, ax, ay, opts){
+oming    opts = opts || {}
+    const len, = Math.hypot(ax, ay) || ric 1
+    const id = this.myPeerIdoc + '-' + (++this.bulletSeqhet)
     const b = {
       id,
-      x: x + (ax/len)*(CFG.PLAYER_R+6),
-      y: y + (ay/len)*(CFG.PLAYER_R+6),
-      vx: (ax/len)*CFG.BULLET_SPEED,
-      vy: (ay/len)*CFG.BULLET_SPEED,
-      owner: ownerId, born: this.time.now,
-      homing: !!opts.homing,
-      bouncesLeft: opts.ricochet || 0,
-      oneshot: !!opts.oneshot,
+     : x: x + (ax/len)*(CFG b.PLAYER_R+6),
+     .b y: y + (ouncesay/len)*(CFG.PLAYLeftER_R+6),
+      vx:, (ax/len)*CFG.BULLET ones_SPEED,
+      vy:hot (ay/len)*CFG.BULL:ET_SPEED,
+      owner: ownerId b, born: this.time.now,
+      hom.ing: !!opts.homing,
+      bonesouncesLeft: opts.ricochet || hot,
     }
-    this.bullets.push(b)
+    this.sendBul0,
+      oneshotlet: !!opts.oneshot,
+    }
+(p    this.bullets.push(b)
     const payload = {
-      id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, owner: ownerId,
-      homing: b.homing, ricochet: b.bouncesLeft, oneshot: b.oneshot,
-    }
-    this.sendBullet(payload)
+      id: b.id, x: b.x, y: b.y, vx: b.vx, vy:ayload)
     this.spawnGhostBullet(payload)
   }
 
