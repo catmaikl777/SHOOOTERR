@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>P2P Shooter — Adaptive Camera</title>
+<title>P2P Shooter — Neon Edition</title>
 <style>
-  html,body{margin:0;padding:0;height:100%;background:#0b0e13;overflow:hidden;
+  html,body{margin:0;padding:0;height:100%;background:#05070d;overflow:hidden;
             touch-action:none;-webkit-user-select:none;user-select:none;
             -webkit-tap-highlight-color:transparent;}
   #game{width:100vw;height:100vh;}
@@ -17,15 +17,15 @@
   #status{position:fixed;top:8px;left:50%;transform:translateX(-50%);
           color:#8b949e;font:clamp(11px,1.8vmin,16px) monospace;z-index:6;
           text-align:center;pointer-events:none;white-space:pre;padding:4px 10px;
-          background:rgba(11,14,19,.55);border-radius:6px;}
+          background:rgba(5,7,13,.6);border-radius:6px;}
   #scores{position:fixed;top:52px;left:12px;color:#e6edf3;
           font:clamp(11px,1.8vmin,16px) monospace;
           z-index:6;pointer-events:none;white-space:pre;line-height:1.6;
-          background:rgba(11,14,19,.55);padding:8px 12px;border-radius:6px;
+          background:rgba(5,7,13,.6);padding:8px 12px;border-radius:6px;
           min-width:140px;}
   #scores .me{color:#3fb950;font-weight:bold;}
   #scores .dead{opacity:.5;text-decoration:line-through;}
-  #ac{position:fixed;top:96px;right:8px;color:#f85149;
+  #ac{position:fixed;top:96px;right:8px;color:#ff2266;
       font:clamp(9px,1.5vmin,13px) monospace;
       z-index:6;text-align:right;pointer-events:none;white-space:pre;opacity:.85;line-height:1.4;}
   #voteBtn{position:fixed;top:8px;right:8px;
@@ -34,20 +34,23 @@
            background:#30363d;color:#e6edf3;border:0;border-radius:6px;
            z-index:7;pointer-events:auto;}
   #voteBtn:active{background:#484f58;}
-  #voteBtn.armed{background:#d29922;color:#000;font-weight:bold;}
-  #voteInfo{position:fixed;top:44px;right:8px;color:#d29922;
+  #voteBtn.armed{background:#ff2266;color:#fff;font-weight:bold;
+                 box-shadow:0 0 12px #ff2266;}
+  #voteInfo{position:fixed;top:44px;right:8px;color:#ff2266;
             font:clamp(10px,1.6vmin,14px) monospace;
             z-index:7;text-align:right;pointer-events:none;white-space:pre;line-height:1.4;}
   #menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
-        justify-content:center;background:#0b0e13;color:#e6edf3;
+        justify-content:center;background:#05070d;color:#e6edf3;
         font-family:monospace;gap:16px;z-index:20;padding:24px;text-align:center;}
-  #menu h1{margin:0;font-size:clamp(22px,4vmin,32px);letter-spacing:2px;}
+  #menu h1{margin:0;font-size:clamp(22px,4vmin,32px);letter-spacing:2px;
+           color:#fff;text-shadow:0 0 10px #ff2266, 0 0 20px #1133ff;}
   #menu input{padding:12px 16px;font-size:clamp(14px,2.2vmin,18px);border-radius:8px;
               border:1px solid #30363d;background:#161b22;color:#e6edf3;
               width:220px;text-align:center;font-family:monospace;}
   #menu button{padding:14px 34px;font-size:clamp(14px,2.2vmin,18px);border-radius:8px;border:0;
-               background:#2f81f7;color:#fff;font-family:monospace;font-weight:bold;}
-  #menu button:active{background:#1f6feb;}
+               background:#1133ff;color:#fff;font-family:monospace;font-weight:bold;
+               box-shadow:0 0 14px #1133ff;}
+  #menu button:active{background:#0020cc;}
   #pid{font-size:clamp(10px,1.6vmin,13px);color:#8b949e;line-height:1.7;max-width:340px;word-break:break-all;}
   #hint{font-size:clamp(11px,1.8vmin,14px);color:#8b949e;line-height:1.7;max-width:320px;}
 </style>
@@ -85,7 +88,20 @@ const CFG = {
   PLAYER_R: 18, SPEED: 240,
   BULLET_SPEED: 780, BULLET_R: 5, BULLET_LIFE: 1.4,
   FIRE_CD: 150, MAX_HP: 100, DAMAGE: 25, RESPAWN: 2500,
-  STATE_MS: 66, INPUT_MS: 66,
+  STATE_MS: 100, INPUT_MS: 66,
+
+  /* 📐 Размеры спрайтов на экране */
+  PLAYER_W: 56, PLAYER_H: 48,
+  BULLET_SIZE: 14,
+
+  /* 🌈 Неоновые цвета стен и пола */
+  WALL_COLOR:  0xff2266,   // красный
+  FLOOR_COLOR: 0x1133ff,   // синий
+  FLOOR_TINT_ALPHA: 1.0,
+
+  /* ✨ Свечение */
+  WALL_GLOW:  true,
+  FLOOR_GLOW: true,
 }
 
 const AC_CFG = {
@@ -594,19 +610,43 @@ function generateWalls(seedStr){
 }
 
 /* ============================================================
-   8. BOOT SCENE
+   8. BOOT SCENE — загрузка PNG с fallback-заглушками
    ============================================================ */
 class BootScene extends Phaser.Scene {
   constructor(){ super('Boot') }
-  
+
   preload(){
-    this.load.image('player', 'player.png')   // 56×48, ствол вправо, белый
-    this.load.image('bullet', 'bullet.png')   // 12×12, жёлтый
-    this.load.image('wall',   'wall.png')     // 40×40, тайлится
-    this.load.image('floor',  'floor.png')    // 80×80, тайлится
+    this.load.image('player', 'player.png')
+    this.load.image('bullet', 'bullet.png')
+    this.load.image('wall',   'wall.png')
+    this.load.image('floor',  'floor.png')
+
+    /* Если PNG нет — сгенерируем заглушку, игра не упадёт */
+    this.load.on('loaderror', file => {
+      DBG.warn('BOOT', 'not found, generating stub:', file.key)
+      this.generateStub(file.key)
+    })
   }
 
-  
+  generateStub(key){
+    if (this.textures.exists(key)) return
+    const g = this.make.graphics({x:0,y:0,add:false})
+    if (key === 'player'){
+      g.fillStyle(0xffffff,1); g.fillCircle(24,24,18); g.fillRect(38,18,18,12)
+      g.generateTexture('player',56,48)
+    } else if (key === 'bullet'){
+      g.fillStyle(0xffe066,1); g.fillCircle(6,6,5)
+      g.generateTexture('bullet',12,12)
+    } else if (key === 'wall'){
+      g.fillStyle(0xffffff,1); g.fillRect(0,0,40,40)
+      g.generateTexture('wall',40,40)
+    } else if (key === 'floor'){
+      g.fillStyle(0xffffff,1); g.fillRect(0,0,80,80)
+      g.generateTexture('floor',80,80)
+    }
+    g.destroy()
+  }
+
   create(){
     this.scene.start('Game')
   }
@@ -624,22 +664,54 @@ class GameScene extends Phaser.Scene {
 
     DBG.log('GAME', 'scene created', { roomId: this.roomId })
 
-    /* карта */
-    this.add.tileSprite(0,0,CFG.W,CFG.H,'floor').setOrigin(0).setDepth(-20)
-    this.wallRects = generateWalls(this.roomId)
-    for (const r of this.wallRects){
-      this.add.image(r.x,r.y,'wall').setOrigin(0).setDepth(-10).setDisplaySize(r.w,r.h)
+    /* ---------- ПОЛ (неоново-синий) ---------- */
+    this.floorSprite = this.add.tileSprite(0, 0, CFG.W, CFG.H, 'floor')
+      .setOrigin(0)
+      .setDepth(-20)
+      .setTint(CFG.FLOOR_COLOR)
+      .setAlpha(CFG.FLOOR_TINT_ALPHA)
+
+    if (CFG.FLOOR_GLOW){
+      /* Мягкое свечение поверх пола */
+      this.add.rectangle(CFG.W/2, CFG.H/2, CFG.W, CFG.H, CFG.FLOOR_COLOR, 0.12)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(-19)
     }
 
-    /* камера */
-    this.cameras.main.setBounds(0,0,CFG.W,CFG.H)
-    this.cameras.main.setBackgroundColor('#0b0e13')
+    /* ---------- СТЕНЫ (неоново-красные) ---------- */
+    this.wallRects = generateWalls(this.roomId)
+    this.wallSprites = []
 
-    /* Адаптивный zoom под размер экрана */
+    /* Слой свечения вокруг стен (под ними) */
+    if (CFG.WALL_GLOW){
+      for (const r of this.wallRects){
+        this.add.image(r.x + r.w/2, r.y + r.h/2, 'wall')
+          .setDisplaySize(r.w + 14, r.h + 14)
+          .setTintFill(CFG.WALL_COLOR)
+          .setAlpha(0.3)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setDepth(-11)
+      }
+    }
+
+    /* Основные стены */
+    for (const r of this.wallRects){
+      const wall = this.add.image(r.x, r.y, 'wall')
+        .setOrigin(0)
+        .setDepth(-10)
+        .setDisplaySize(r.w, r.h)
+        .setTintFill(CFG.WALL_COLOR)
+      this.wallSprites.push(wall)
+    }
+
+    /* ---------- КАМЕРА ---------- */
+    this.cameras.main.setBounds(0, 0, CFG.W, CFG.H)
+    this.cameras.main.setBackgroundColor('#05070d')
+
     this.updateCameraZoom()
     this.scale.on('resize', () => this.updateCameraZoom())
 
-    /* состояние */
+    /* ---------- СОСТОЯНИЕ ---------- */
     this.views = {}
     this.ghostBullets = {}
     this.inputs = {}
@@ -702,7 +774,6 @@ class GameScene extends Phaser.Scene {
     const w = this.scale.width
     const h = this.scale.height
     const shortSide = Math.min(w, h)
-
     const worldView = shortSide < 600 ? 450 : 700
     const zoom = clamp(shortSide / worldView, 0.9, 2.5)
     this.cameras.main.setZoom(zoom)
@@ -718,7 +789,7 @@ class GameScene extends Phaser.Scene {
     const joyL = nipplejs.create({
       zone: document.getElementById('joyL'),
       mode:'static', position:{left:'50%',top:'50%'},
-      color:'#3d7dff', size:110, threshold:0.1,
+      color:'#1133ff', size:110, threshold:0.1,
     })
     joyL.on('move', (e,d)=>{
       const f = Math.min(d.force,1)
@@ -730,7 +801,7 @@ class GameScene extends Phaser.Scene {
     const joyR = nipplejs.create({
       zone: document.getElementById('joyR'),
       mode:'static', position:{left:'50%',top:'50%'},
-      color:'#ff5c5c', size:110, threshold:0.1,
+      color:'#ff2266', size:110, threshold:0.1,
     })
     joyR.on('start', ()=>{ this.firing = true })
     joyR.on('move', (e,d)=>{
@@ -801,7 +872,6 @@ class GameScene extends Phaser.Scene {
 
       const { type } = msg
 
-      /* --- Системные сообщения --- */
       if (type === 'banned'){
         DBG.err('NET', '🚫 SERVER BANNED YOU:', msg.reason)
         DBG.banner('BANNED: ' + msg.reason, '#f85149')
@@ -814,7 +884,6 @@ class GameScene extends Phaser.Scene {
         return
       }
 
-      /* ---- WELCOME ---- */
       if (type === 'welcome'){
         this.serverHostId = msg.host
         DBG.log('NET', '*** WELCOMED ***', msg.peerId, 'host:', msg.host, 'peers:', msg.peers)
@@ -830,7 +899,7 @@ class GameScene extends Phaser.Scene {
           this.hasBecomeClient = false
           this.sendId({ pubHash: this.identity.pubHash, mode: this.identity.mode }, this.myPeerId)
           this.becomeHost()
-          DBG.banner('YOU ARE HOST', '#d29922')
+          DBG.banner('YOU ARE HOST', '#ff2266')
         } else {
           DBG.log('NET', 'I AM CLIENT, host =', msg.host)
           this.isHost = false
@@ -855,7 +924,6 @@ class GameScene extends Phaser.Scene {
         return
       }
 
-      /* ---- PEER JOIN ---- */
       if (type === 'peer-join'){
         DBG.log('PEER', '🎉 peer joined:', msg.peerId)
         this.peers.add(msg.peerId)
@@ -874,7 +942,6 @@ class GameScene extends Phaser.Scene {
         return
       }
 
-      /* ---- PEER LEAVE ---- */
       if (type === 'peer-leave'){
         DBG.log('PEER', '👋 peer left:', msg.peerId)
         this.peers.delete(msg.peerId)
@@ -883,7 +950,6 @@ class GameScene extends Phaser.Scene {
         return
       }
 
-      /* ---- HOST CHANGE ---- */
       if (type === 'host-change'){
         DBG.log('NET', '*** HOST CHANGED *** →', msg.host)
         this.serverHostId = msg.host
@@ -892,7 +958,7 @@ class GameScene extends Phaser.Scene {
           this.isHost = true
           this.hasBecomeClient = false
           this.becomeHost()
-          DBG.banner('YOU ARE HOST', '#d29922')
+          DBG.banner('YOU ARE HOST', '#ff2266')
         } else {
           this.isHost = false
           this.hasBecomeClient = true
@@ -901,7 +967,6 @@ class GameScene extends Phaser.Scene {
         return
       }
 
-      /* ---- ОБЫЧНОЕ ИГРОВОЕ ---- */
       const action = msg.a
       const fromId = msg.from
       const data = msg.d
@@ -943,7 +1008,6 @@ class GameScene extends Phaser.Scene {
     if (!this.ws || this.ws.readyState !== 1) return
     this.ws.send(JSON.stringify({ to: peerId, data: { a: action, d: data } }))
   }
-
   broadcast(action, data){
     if (!this.ws || this.ws.readyState !== 1) return
     this.ws.send(JSON.stringify({ data: { a: action, d: data } }))
@@ -1011,16 +1075,13 @@ class GameScene extends Phaser.Scene {
       this.onAntiCheatBan(data.id, data.reason || 'banned', !!data.pubHash)
     }
   }
-  /* ✅ FIX: обе стороны шлют ping и обе измеряют RTT */
   onNetPing(data, fromId){
     const p = this.ac.ensure(fromId)
     if (data.pong){
-      /* Пришёл ответ — считаем RTT */
       p.rtt = performance.now() - data.t
       p.lastUpdate = performance.now()
       DBG.log('PING', 'pong from', fromId.slice(0,8), 'rtt:', Math.round(p.rtt))
     } else {
-      /* Пришёл запрос — отвечаем pong */
       this.sendPing({ t: data.t, pong: 1 }, fromId)
     }
   }
@@ -1100,7 +1161,6 @@ class GameScene extends Phaser.Scene {
     }
 
     if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
-
     DBG.log('HOST', 'added player to world:', id.slice(0,12),
       'at', this.worldPlayers[id].x, this.worldPlayers[id].y)
   }
@@ -1246,7 +1306,6 @@ class GameScene extends Phaser.Scene {
   }
 
   /* =========== STATUS =========== */
-  /* ✅ FIX: одна формула для обеих ролей — RTT до собеседника из ac.peers */
   updateStatus(){
     if (!this.statusEl) return
     const n = this.peers.size + (this.myPeerId ? 1 : 0)
@@ -1255,8 +1314,6 @@ class GameScene extends Phaser.Scene {
     const pid = (this.identity?.pubHash || '?').slice(0,8)
     const sc = this.local.score || 0
 
-    /* Худший RTT среди пиров — то, что чувствует самый дальний игрок.
-       У хоста это макс. по всем клиентам, у клиента — RTT до хоста. */
     let ping = 0
     for (const [, p] of this.ac.peers){
       const v = p.rtt || 0
@@ -1335,7 +1392,11 @@ class GameScene extends Phaser.Scene {
 
   spawnGhostBullet(d){
     if (this.ghostBullets[d.id]) return
-    const s = this.add.image(d.x, d.y, 'bullet').setDepth(5)
+    const s = this.add.image(d.x, d.y, 'bullet')
+      .setDisplaySize(CFG.BULLET_SIZE, CFG.BULLET_SIZE)
+      .setTint(0xffe066)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(5)
     this.ghostBullets[d.id] = { sprite:s, vx:d.vx, vy:d.vy, born:this.time.now }
   }
 
@@ -1347,7 +1408,7 @@ class GameScene extends Phaser.Scene {
     if (d.target === this.myPeerId){
       this.local.hp = d.hp
       this.local.dead = !!d.dead
-      this.cameras.main.flash(90, 120, 0, 0)
+      this.cameras.main.flash(90, 255, 30, 100)
     }
     const v = this.views[d.target]
     if (v){
@@ -1361,7 +1422,10 @@ class GameScene extends Phaser.Scene {
   /* =========== VIEWS =========== */
   createView(id){
     if (this.views[id]) return this.views[id]
-    const sprite = this.add.image(0,0,'player').setDepth(10).setTint(colorFromId(id))
+    const sprite = this.add.image(0, 0, 'player')
+      .setDisplaySize(CFG.PLAYER_W, CFG.PLAYER_H)
+      .setDepth(10)
+      .setTint(colorFromId(id))
     const bar = this.add.graphics().setDepth(11)
     this.views[id] = { sprite, bar, hp:CFG.MAX_HP, dead:false, tx:0, ty:0, ta:0, init:false, buffer:[] }
     return this.views[id]
@@ -1393,8 +1457,7 @@ class GameScene extends Phaser.Scene {
     this.local.aimX = this.aimVec.x
     this.local.aimY = this.aimVec.y
 
-    /* ✅ FIX: ping-цикл у ОБОИХ — и хост, и клиент шлют ping всем пирам.
-       Раньше это было только в simulateHost → у клиента ping не измерялся. */
+    /* Ping каждые 2 сек — и хост, и клиент */
     if (time - this._lastPing > 2000){
       this._lastPing = time
       for (const peerId of this.peers){
@@ -1402,7 +1465,6 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    /* Клиент отправляет ввод хосту */
     if (!this.isHost && time - this.lastInputSent > CFG.INPUT_MS){
       this.lastInputSent = time
       const hostId = this.currentHostId()
@@ -1577,7 +1639,6 @@ class GameScene extends Phaser.Scene {
         else this.sendState(payload, peerId)
       }
     }
-    /* ⚠️ ping-цикл убран отсюда → перенесён в update() */
   }
 
   hostSpawnBullet(ownerId, x, y, ax, ay){
@@ -1626,7 +1687,7 @@ class GameScene extends Phaser.Scene {
         if (!v.init){ v.init = true; v.sprite.x = v.tx; v.sprite.y = v.ty }
         else { v.sprite.x = v.tx; v.sprite.y = v.ty }
       } else if (v.buffer && v.buffer.length >= 2){
-        const renderTime = performance.now() - 40
+        const renderTime = performance.now() - 100
         let a = v.buffer[0], b = v.buffer[v.buffer.length-1]
         for (let i = 0; i < v.buffer.length - 1; i++){
           if (v.buffer[i].t <= renderTime && v.buffer[i+1].t > renderTime){
@@ -1706,7 +1767,7 @@ class GameScene extends Phaser.Scene {
     new Phaser.Game({
       type: Phaser.AUTO,
       parent: 'game',
-      backgroundColor: '#0b0e13',
+      backgroundColor: '#05070d',
       scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
       render: { antialias:false, pixelArt:false, roundPixels:true },
       fps: { target:45, min:25 },
