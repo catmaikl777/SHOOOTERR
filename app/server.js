@@ -12,29 +12,27 @@ const wss = new WebSocketServer({ port, maxPayload: 2048 });
 // ============================================================
 const AC = {
   MAX_PACKET_BYTES:        1024,
-  MAX_MSG_PER_SEC:         60,       // от одного клиента
+  MAX_MSG_PER_SEC:         60,
   MAX_ROOMS:               200,
   MAX_CLIENTS_PER_ROOM:    12,
   MAX_SEQ_GAP:             500,
   STRIKE_DECAY_MS:         60000,
   STRIKE_KICK:             8,
   STRIKE_SEVERE:           3,
-  IDENTITY_TIMEOUT_MS:     20000,
-  JOIN_RATE_LIMIT_MS:      2000,
   BAN_FILE:                './bans.json',
-  IP_BAN_MS:               60 * 60 * 1000,   // 1 час
+  IP_BAN_MS:               60 * 60 * 1000,
   MAX_BANS_PER_IP:         3,
 };
 
 // ============================================================
 // ХРАНИЛИЩЕ
 // ============================================================
-const rooms         = new Map();   // roomId -> Set<ws>
-const roomHost      = new Map();   // roomId -> peerId
-const clients       = new Map();   // peerId -> clientState
-const bannedHashes  = new Set();   // pubHash
-const ipStrikes     = new Map();   // ip -> { count, until }
-const ipBanList     = new Map();   // ip -> banUntil
+const rooms         = new Map();
+const roomHost      = new Map();
+const clients       = new Map();
+const bannedHashes  = new Set();
+const ipStrikes     = new Map();
+const ipBanList     = new Map();
 
 // ============================================================
 // УТИЛИТЫ
@@ -150,6 +148,44 @@ function checkRate(c){
   return true;
 }
 
+// 🆕 Централизованная очистка клиента
+function cleanupClient(ws, reason){
+  const c = clients.get(ws.peerId);
+  if (!c) return;
+  const roomId = c.room;
+  if (!roomId){ clients.delete(c.peerId); return; }
+  const room = rooms.get(roomId);
+  if (!room){ clients.delete(c.peerId); return; }
+
+  room.delete(ws);
+
+  for (const peer of room){
+    if (peer.readyState === 1){
+      try { peer.send(JSON.stringify({ type: 'peer-leave', peerId: c.peerId })); } catch {}
+    }
+  }
+
+  if (roomHost.get(roomId) === c.peerId){
+    const remaining = [...room];
+    if (remaining.length > 0){
+      const newHost = remaining[0].peerId;
+      roomHost.set(roomId, newHost);
+      for (const p of remaining){
+        if (p.readyState === 1){
+          try { p.send(JSON.stringify({ type: 'host-change', host: newHost })); } catch {}
+        }
+      }
+      console.log(`[Room ${roomId}] host → ${newHost.slice(0,8)}`);
+    } else {
+      roomHost.delete(roomId);
+    }
+  }
+
+  if (room.size === 0) rooms.delete(roomId);
+  clients.delete(c.peerId);
+  console.log(`[S] - ${c.peerId.slice(0,8)} (${reason})`);
+}
+
 // ============================================================
 // ГЛАВНЫЙ ОБРАБОТЧИК
 // ============================================================
@@ -160,7 +196,6 @@ wss.on('connection', (ws, req) => {
     ws._socket.setNoDelay(true)
   }
 
-  // IP-бан
   const banUntil = ipBanList.get(ip);
   if (banUntil && banUntil > Date.now()){
     console.log(`[AC] rejected ${ip} (IP banned)`);
@@ -230,13 +265,11 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    // Всё остальное — только после join
     if (!c.room){
       strike(c, 'msg before join', AC.STRIKE_SEVERE);
       return;
     }
 
-    // ---- IDENTITY (публичный хеш) ----
     if (msg.a === 'id' && msg.d && msg.d.pubHash){
       const hash = String(msg.d.pubHash).slice(0, 64);
       if (bannedHashes.has(hash)){
@@ -246,7 +279,6 @@ wss.on('connection', (ws, req) => {
       c.pubHash = hash;
     }
 
-    // ---- INPUT от клиента (in) ----
     if (msg.a === 'in' && msg.d){
       const d = msg.d;
       if (!validateInputPayload(d)){
@@ -263,14 +295,12 @@ wss.on('connection', (ws, req) => {
       }
       c.seq = d.seq;
 
-      // Нормализуем векторы
       const lenM = Math.hypot(d.m[0], d.m[1]);
       if (lenM > 1.05){ d.m[0] /= lenM; d.m[1] /= lenM; }
       const lenA = Math.hypot(d.a[0], d.a[1]);
       if (lenA > 1.05){ d.a[0] /= lenA; d.a[1] /= lenA; }
     }
 
-    // ---- STATE и BULLET и HIT — только от хоста ----
     if (msg.a === 'st' || msg.a === 'bl' || msg.a === 'hit'){
       const hostId = roomHost.get(c.room);
       if (hostId !== c.peerId){
@@ -279,7 +309,6 @@ wss.on('connection', (ws, req) => {
       }
     }
 
-    // ---- BAN от хоста — реплицируем и проверяем ----
     if (msg.a === 'ban'){
       const hostId = roomHost.get(c.room);
       if (hostId !== c.peerId){
@@ -296,10 +325,8 @@ wss.on('connection', (ws, req) => {
           try { tc.ws.close(1008, 'banned'); } catch {}
         }
       }
-      // продолжаем релей, чтобы клиенты получили ban-нотификацию
     }
 
-    // ---- РЕЛЕЙ ----
     const room = rooms.get(c.room);
     if (!room) return;
 
@@ -317,54 +344,65 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  ws.on('close', () => {
-    const roomId = c.room;
-    if (!roomId){ clients.delete(c.peerId); return; }
-    const room = rooms.get(roomId);
-    if (!room){ clients.delete(c.peerId); return; }
-    room.delete(ws);
-
-    for (const peer of room){
-      if (peer.readyState === 1){
-        try { peer.send(JSON.stringify({ type: 'peer-leave', peerId: c.peerId })); } catch {}
-      }
-    }
-
-    if (roomHost.get(roomId) === c.peerId){
-      const remaining = [...room];
-      if (remaining.length > 0){
-        const newHost = remaining[0].peerId;
-        roomHost.set(roomId, newHost);
-        for (const p of remaining){
-          if (p.readyState === 1){
-            try { p.send(JSON.stringify({ type: 'host-change', host: newHost })); } catch {}
-          }
-        }
-        console.log(`[Room ${roomId}] host → ${newHost.slice(0,8)}`);
-      } else {
-        roomHost.delete(roomId);
-      }
-    }
-
-    if (room.size === 0) rooms.delete(roomId);
-    clients.delete(c.peerId);
-    console.log(`[S] - ${c.peerId.slice(0,8)}`);
-  });
-
+  ws.on('close', () => cleanupClient(ws, 'close'));
   ws.on('error', err => console.error(`[S] err ${c.peerId?.slice(0,8)}:`, err.message));
   ws.on('pong', () => { ws.isAlive = true; });
 });
 
 // ============================================================
-// HEARTBEAT
+// HEARTBEAT — 10 секунд (быстро находит мёртвые сокеты)
 // ============================================================
 setInterval(() => {
   wss.clients.forEach(ws => {
-    if (ws.isAlive === false){ try { ws.terminate(); } catch {} return; }
+    if (ws.isAlive === false){
+      console.log(`[S] dead socket ${ws.peerId?.slice(0,8)} — terminate`);
+      try { ws.terminate(); } catch {}
+      return;
+    }
     ws.isAlive = false;
     try { ws.ping(); } catch {}
   });
-}, 30000);
+}, 10000);
+
+// ============================================================
+// АВТООЧИСТКА ОСИРОТЕВШИХ КЛИЕНТОВ (раз в 15 сек)
+// ============================================================
+setInterval(() => {
+  const activeIds = new Set([...wss.clients].map(ws => ws.peerId));
+  for (const [peerId, c] of clients){
+    if (!activeIds.has(peerId)){
+      console.log(`[S] orphan client ${peerId.slice(0,8)} — cleanup`);
+      const roomId = c.room;
+      if (roomId){
+        const room = rooms.get(roomId);
+        if (room){
+          for (const peer of room){
+            if (peer.readyState === 1){
+              try { peer.send(JSON.stringify({ type: 'peer-leave', peerId })); } catch {}
+            }
+          }
+          room.delete(c.ws);
+          if (roomHost.get(roomId) === peerId){
+            const remaining = [...room];
+            if (remaining.length > 0){
+              const newHost = remaining[0].peerId;
+              roomHost.set(roomId, newHost);
+              for (const p of remaining){
+                if (p.readyState === 1){
+                  try { p.send(JSON.stringify({ type: 'host-change', host: newHost })); } catch {}
+                }
+              }
+            } else {
+              roomHost.delete(roomId);
+            }
+          }
+          if (room.size === 0) rooms.delete(roomId);
+        }
+      }
+      clients.delete(peerId);
+    }
+  }
+}, 15000);
 
 // ============================================================
 // МЕТРИКИ (каждые 60 сек)
