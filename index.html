@@ -959,7 +959,6 @@ class GameScene extends Phaser.Scene {
         DBG.log('PEER', '👋 peer left:', msg.peerId)
         this.peers.delete(msg.peerId)
         this.onPeerLeft(msg.peerId)
-        /* 🆕 Принудительно чистим view/score/name сразу, не дожидаясь state */
         this.destroyView(msg.peerId)
         delete this.scores[msg.peerId]
         delete this.peerNames[msg.peerId]
@@ -1068,9 +1067,23 @@ class GameScene extends Phaser.Scene {
     if (this.isHost) return
     this.applyState(data)
   }
+  /* 🆕 ФИКС двойной струи: если пуля наша и есть свежая локальная — пропускаем */
   onNetBullet(data){
     if (this.isHost) return
-    if (data.owner === this.myPeerId && this.ghostBullets[data.id]) return
+
+    if (data.owner === this.myPeerId){
+      const prefix = 'local_' + this.myPeerId + '_'
+      const now = performance.now()
+      let hasFreshLocal = false
+      for (const k in this.ghostBullets){
+        if (k.startsWith(prefix) && now - this.ghostBullets[k].born < 300){
+          hasFreshLocal = true
+          break
+        }
+      }
+      if (hasFreshLocal) return
+    }
+
     this.spawnGhostBullet(data)
   }
   onNetHit(data){
@@ -1372,7 +1385,6 @@ class GameScene extends Phaser.Scene {
 
     const rows = []
     for (const id in this.scores){
-      /* 🆕 Пропускаем тех, кто уже вышел */
       if (id !== this.myPeerId && !this.peers.has(id)) continue
 
       const score = this.scores[id]
@@ -1414,7 +1426,6 @@ class GameScene extends Phaser.Scene {
     }
 
     for (const id in data.p){
-      /* 🆕 Пропускаем пакеты о тех, кого уже нет в комнате */
       if (id !== this.myPeerId && !this.peers.has(id)) continue
 
       const [x,y,ax,ay,hp,dead] = data.p[id]
@@ -1439,7 +1450,6 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    /* 🆕 Удаляем view тех, кого нет ни в state, ни в this.peers */
     for (const id in this.views){
       if (id === this.myPeerId) continue
       if (!(id in data.p) || !this.peers.has(id)){
@@ -1527,7 +1537,6 @@ class GameScene extends Phaser.Scene {
     this.local.aimX = this.aimVec.x
     this.local.aimY = this.aimVec.y
 
-    /* Ping каждые 2 сек — и хост, и клиент */
     if (time - this._lastPing > 2000){
       this._lastPing = time
       for (const peerId of this.peers){
@@ -1563,7 +1572,7 @@ class GameScene extends Phaser.Scene {
       this.simulateHost(time, dt)
     }
 
-    /* Локальное предсказание пуль у клиента */
+    /* Локальное предсказание пуль у клиента — только у не-хоста */
     if (!this.isHost && this.firing && time - this._lastLocalShot > CFG.FIRE_CD && !this.local.dead){
       this._lastLocalShot = time
       const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
@@ -1753,7 +1762,6 @@ class GameScene extends Phaser.Scene {
   renderPlayers(time, dt){
     const k = Math.min(1, dt*14)
     for (const id in this.views){
-      /* 🆕 Если игрока уже нет в комнате — не рендерим и удаляем */
       if (id !== this.myPeerId && !this.peers.has(id)){
         this.destroyView(id)
         continue
