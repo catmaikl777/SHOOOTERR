@@ -1,4 +1,4 @@
-4<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -30,7 +30,7 @@
           font:clamp(11px,1.8vmin,16px) monospace;
           z-index:6;pointer-events:none;white-space:pre;line-height:1.6;
           background:rgba(5,7,13,.6);padding:8px 12px;border-radius:6px;
-          min-width:140px;}
+          min-width:140px;max-height:130px;overflow:hidden;}
   #scores .me{color:#3fb950;font-weight:bold;}
   #scores .dead{opacity:.5;text-decoration:line-through;}
   #ac{position:fixed;top:96px;right:8px;color:#ff2266;
@@ -52,6 +52,48 @@
   #voteInfo{position:fixed;top:44px;right:8px;color:#ff2266;
             font:clamp(10px,1.6vmin,14px) monospace;
             z-index:7;text-align:right;pointer-events:none;white-space:pre;line-height:1.4;}
+
+  /* ====== DASH ====== */
+  #dashBtn{position:fixed;right:4vw;bottom:calc(5vh + 34vmin);
+           width:clamp(72px,11vmin,104px);height:clamp(72px,11vmin,104px);
+           border-radius:50%;border:2px solid #ff2266aa;background:#ff226622;
+           color:#ff2266;font:bold clamp(20px,3.6vmin,30px) monospace;
+           z-index:7;pointer-events:auto;cursor:pointer;
+           text-shadow:0 0 8px #ff2266;transition:transform .08s,background .15s,opacity .15s;
+           box-shadow:0 0 18px #ff226644, inset 0 0 12px #ff226633;
+           display:flex;align-items:center;justify-content:center;
+           padding:0;line-height:1;}
+  #dashBtn:active{background:#ff226666;transform:scale(.92);}
+  #dashBtn.cooling{opacity:.35;color:#8b949e;border-color:#30363d;
+                   background:#30363d55;text-shadow:none;box-shadow:none;
+                   font-size:clamp(14px,2.2vmin,20px);}
+
+  /* ====== KILLFEED ====== */
+  #killfeed{position:fixed;top:200px;left:12px;
+            z-index:6;pointer-events:none;
+            font:clamp(11px,1.7vmin,15px) monospace;
+            line-height:1.5;max-width:min(320px,42vw);}
+  #killfeed .kf{background:rgba(5,7,13,.75);
+                padding:5px 10px;border-radius:6px;margin-bottom:4px;
+                border-left:3px solid #ff2266;color:#e6edf3;
+                animation:kfIn .28s cubic-bezier(.2,.9,.3,1.2);
+                box-shadow:0 0 10px #ff226633;
+                white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #killfeed .kf.mine{border-left-color:#3fb950;box-shadow:0 0 14px #3fb95066;}
+  #killfeed .kf .who{color:#3fb950;}
+  #killfeed .kf .vic{color:#f85149;}
+  #killfeed .kf .wp{opacity:.85;margin:0 6px;}
+  @keyframes kfIn{
+    from{opacity:0;transform:translateX(-24px) scale(.92);}
+    to{opacity:1;transform:translateX(0) scale(1);}
+  }
+
+  /* ====== VIGNETTE ====== */
+  #vignette{position:fixed;inset:0;pointer-events:none;z-index:4;
+            background:radial-gradient(ellipse at center,
+              rgba(0,0,0,0) 42%, rgba(255,34,102,.42) 100%);
+            opacity:0;transition:opacity .35s;}
+
   #menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
         justify-content:center;background:#05070d;color:#e6edf3;
         font-family:monospace;gap:16px;z-index:20;padding:24px;text-align:center;}
@@ -77,8 +119,11 @@
 <div id="scores"></div>
 <div id="voteInfo"></div>
 <div id="ac"></div>
+<div id="killfeed"></div>
+<div id="vignette"></div>
 <button id="voteBtn" style="display:none">VOTE HOST</button>
 <button id="soundBtn" style="display:none">🔊</button>
+<button id="dashBtn" style="display:none">⚡</button>
 
 <div id="menu">
   <h1>Shoot'n'cats</h1>
@@ -88,7 +133,8 @@
   <div id="hint">
     Левый стик — движение<br>
     Правый стик — прицел и огонь<br>
-    Бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💀 ваншот
+    ⚡ — рывок (кулдаун 1.4с)<br>
+    Бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💦 распылитель
   </div>
   <div id="pid">…generating identity…</div>
 </div>
@@ -127,8 +173,17 @@ const CFG = {
   BONUS_HOMING_NOISE: 0.4,
   BONUS_RICOCHET_MAX: 2,
   BONUS_HOMING_FIRE_CD: 2000,
-  BONUS_ONESHOT_FIRE_CD: 5000,
-  BONUS_ONESHOT_DAMAGE: 999,
+
+  /* 🆕 РАСПЫЛИТЕЛЬ вместо ваншота */
+  BONUS_SPRAYER_FIRE_CD:  700,
+  BONUS_SPRAYER_PELLETS:  7,
+  BONUS_SPRAYER_SPREAD_DEG: 30,
+  BONUS_SPRAYER_DAMAGE_MUL: 0.5,   // 25 * 0.5 = 12.5 урона на пулю
+
+  /* РЫВОК */
+  DASH_SPEED: 720,
+  DASH_DURATION: 160,
+  DASH_CD: 1400,
 
   SFX_MAX_DIST:      1400,
   SFX_MASTER:        0.55,
@@ -138,7 +193,7 @@ const CFG = {
 
 const AC_CFG = {
   MAX_INPUT_HZ: 45, MAX_PACKET_BYTES: 512, MAX_SEQ_GAP: 300, PEER_TIMEOUT_MS: 20000,
-  SPEED_TOLERANCE: 1.35, TELEPORT_HARD: 150,
+  SPEED_TOLERANCE: 1.35, TELEPORT_HARD: 200,
   FIRE_TOLERANCE: 0.85, AIM_MIN_MAG: 0.05,
   AIM_SNAP_DEG: 100, AIM_SNAP_WINDOW_MS: 40, AIM_HISTORY_MS: 2500,
   ACCURACY_SUSPICIOUS: 0.94, ACCURACY_MIN_SHOTS: 25,
@@ -174,9 +229,6 @@ const DBG = {
     const dt = ((performance.now() - this.t0) / 1000).toFixed(2)
     console.error(`[T:${tag} +${dt}s]`, ...args)
   },
-  banner(text, color = '#2f81f7'){
-    console.log(`%c ${text} `, `background:${color};color:#fff;padding:4px 8px;font-weight:bold;border-radius:3px`)
-  },
 }
 
 /* ============================================================
@@ -189,6 +241,9 @@ function clamp(v,a,b){return v<a?a:v>b?b:v}
 function fnv1a(str){let h=2166136261>>>0;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)}return(h>>>0).toString(36)}
 function randomToken(len=24){const b=new Uint8Array(len);crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,'0')).join('')}
 function cleanName(s){ return String(s||'').replace(/[<>&"']/g,'').trim().slice(0,14) }
+function escapeHtml(s){
+  return String(s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]))
+}
 
 function resolveCircleRect(px,py,r,rect){
   const cx=clamp(px,rect.x,rect.x+rect.w), cy=clamp(py,rect.y,rect.y+rect.h)
@@ -250,7 +305,6 @@ class SoundEngine {
 
     this.master.connect(comp); comp.connect(this.ctx.destination)
 
-    /* 🆕 Reverb подключён к master, чтобы эффект был слышен */
     this.reverb = this.ctx.createConvolver()
     this.reverb.buffer = this._makeIR(1.6, 2.4)
     const reverbGain = this.ctx.createGain()
@@ -361,10 +415,11 @@ class SoundEngine {
   shoot(kind = 'normal', pan = 0, volMul = 1){
     if (!this._throttle('shoot', 15)) return
     const V = 0.22 * volMul
-    if (kind === 'oneshot'){
-      this._tone({freq: 140, freqEnd: 40, type:'sawtooth', dur:0.35, vol:V*1.2, pan, send:0.4})
-      this._noise({dur:0.28, vol:V*1.1, type:'lowpass', freq:2400, freqEnd:180, pan, send:0.4})
-      this._tone({freq: 900, freqEnd: 200, type:'square', dur:0.18, vol:V*0.5, pan, send:0.4})
+    if (kind === 'sprayer'){
+      // 🆕 Дробовик: плотный шумовой удар + низкий thump
+      this._noise({dur:0.16, vol:V*1.3, type:'lowpass', freq:2200, freqEnd:250, pan, send:0.35})
+      this._tone({freq: 150, freqEnd: 45, type:'sawtooth', dur:0.2, vol:V*1.0, pan, send:0.3})
+      this._tone({freq: 700, freqEnd: 250, type:'square', dur:0.1, vol:V*0.4, pan, send:0.2})
       return
     }
     if (kind === 'homing' || kind === 'homingRicochet'){
@@ -377,6 +432,13 @@ class SoundEngine {
       this._noise({dur:0.09, vol:V, type:'lowpass', freq:3200, freqEnd:700, pan, send:0.12})
       this._tone({freq: 200, freqEnd: 60, type:'sawtooth', dur:0.12, vol:V*0.5, pan, send:0.08})
     }
+  }
+  dash(pan = 0, volMul = 1){
+    if (!this._throttle('dash', 60)) return
+    const V = 0.28 * volMul
+    this._noise({dur:0.18, vol:V, type:'highpass', freq:600, freqEnd:2600, pan, send:0.25})
+    this._tone({freq: 240, freqEnd: 900, type:'sawtooth', dur:0.16, vol:V*0.7, pan, send:0.2})
+    this._tone({freq: 900, freqEnd: 1700, type:'triangle', dur:0.14, vol:V*0.45, pan, send:0.25})
   }
   hitPlayer(pan = 0, volMul = 1){
     if (!this._throttle('hitp', 30)) return
@@ -422,10 +484,11 @@ class SoundEngine {
     } else if (type === 'shield'){
       this._tone({freq: 1000, freqEnd: 1800, type:'sine', dur:0.35, vol:V, pan, send:0.5})
       this._tone({freq: 1500, freqEnd: 2400, type:'triangle', dur:0.3, vol:V*0.7, pan, send:0.5})
-    } else if (type === 'oneshot'){
-      this._tone({freq: 300, freqEnd: 1200, type:'sawtooth', dur:0.35, vol:V*1.1, pan, send:0.35})
-      this._tone({freq: 180, freqEnd: 90, type:'square', dur:0.4, vol:V*0.8, pan, send:0.35})
-      this._noise({dur:0.25, vol:V*0.5, type:'bandpass', freq:600, pan, send:0.35})
+    } else if (type === 'sprayer'){
+      // 🆕 Звук подбора распылителя — «щёлк» барабана
+      this._tone({freq: 250, freqEnd: 900, type:'sawtooth', dur:0.3, vol:V*1.0, pan, send:0.3})
+      this._noise({dur:0.2, vol:V*0.6, type:'bandpass', freq:900, pan, send:0.3})
+      this._tone({freq: 500, freqEnd: 1200, type:'triangle', dur:0.25, vol:V*0.5, pan, send:0.3})
     } else {
       this._tone({freq: 700, freqEnd: 1100, type:'sine', dur:0.2, vol:V, pan, send:0.2})
     }
@@ -471,14 +534,13 @@ class SoundEngine {
 }
 
 /* ============================================================
-   5. IDENTITY — с таймаутом и fallback
+   5. IDENTITY
    ============================================================ */
 class Identity {
   constructor(){
     this.ready=false; this.mode='none'; this.pubHash=null
     this.keyPair=null; this.pubJwk=null
   }
-
   _timeout(promise, ms, label){
     return Promise.race([
       promise,
@@ -487,7 +549,6 @@ class Identity {
       )
     ])
   }
-
   _fallback(reason){
     let stored = localStorage.getItem('p2p_fallback_id')
     if (!stored){
@@ -499,27 +560,20 @@ class Identity {
     this.ready = true
     DBG.warn('ID', 'fallback mode:', reason)
   }
-
   async init(){
     if (!(window.isSecureContext && window.crypto && crypto.subtle)) {
       this._fallback('no secure context / no crypto.subtle')
       return
     }
-
     const storeKey = 'p2p_ecdsa_key'
     let stored = null
     try { stored = JSON.parse(localStorage.getItem(storeKey)) } catch {}
-
-    /* Битый ключ — стираем */
     if (stored && (!stored.priv || !stored.pub)){
-      DBG.warn('ID', 'битый ключ в localStorage — сбрасываем')
       try { localStorage.removeItem(storeKey) } catch {}
       stored = null
     }
-
     try {
       if (stored){
-        DBG.log('ID', 'восстанавливаем ключ из хранилища')
         this.keyPair = {
           privateKey: await this._timeout(
             crypto.subtle.importKey('jwk', stored.priv,
@@ -534,7 +588,6 @@ class Identity {
         }
         this.pubJwk = stored.pub
       } else {
-        DBG.log('ID', 'генерируем новый ключ (таймаут 3с)')
         this.keyPair = await this._timeout(
           crypto.subtle.generateKey(
             {name:'ECDSA', namedCurve:'P-256'}, true, ['sign','verify']),
@@ -550,30 +603,22 @@ class Identity {
         )
         try {
           localStorage.setItem(storeKey, JSON.stringify({priv: privJwk, pub: this.pubJwk}))
-        } catch(e){ DBG.warn('ID', 'localStorage полон', e.message) }
+        } catch(e){}
       }
-
-      const hex = await this._timeout(
-        this._sha256hex(JSON.stringify(this.pubJwk)),
-        2000, 'sha256'
-      )
+      const hex = await this._timeout(this._sha256hex(JSON.stringify(this.pubJwk)), 2000, 'sha256')
       this.pubHash = hex.slice(0,16)
       this.mode = 'crypto'
       this.ready = true
-      DBG.log('ID', 'crypto mode ready', this.pubHash)
-
     } catch (e) {
       try { localStorage.removeItem(storeKey) } catch {}
       this._fallback(e.message || String(e))
     }
   }
-
   async _sha256hex(str){
     const buf = new TextEncoder().encode(str)
     const h = await crypto.subtle.digest('SHA-256', buf)
     return Array.from(new Uint8Array(h), b => b.toString(16).padStart(2,'0')).join('')
   }
-
   async sign(str){
     if (this.mode !== 'crypto' || !crypto?.subtle) return 'no-crypto'
     try {
@@ -583,12 +628,8 @@ class Identity {
         2000, 'sign'
       )
       return btoa(String.fromCharCode(...new Uint8Array(sig)))
-    } catch(e){
-      DBG.warn('ID', 'sign failed', e.message)
-      return 'no-crypto'
-    }
+    } catch(e){ return 'no-crypto' }
   }
-
   async verify(pubJwk, str, sigB64){
     if (this.mode !== 'crypto' || !crypto?.subtle) return false
     if (!pubJwk || !sigB64) return false
@@ -729,7 +770,7 @@ class AntiCheat {
       Number.isFinite(v[0]) && Number.isFinite(v[1]) &&
       Math.abs(v[0]) <= 10 && Math.abs(v[1]) <= 10
   }
-  validateMovement(id, prev, next, dt){
+  validateMovement(id, prev, next, dt, speedLimit){
     if (!prev) return { x: next.x, y: next.y }
     const dx = next.x - prev.x, dy = next.y - prev.y
     const dist = Math.hypot(dx, dy)
@@ -737,7 +778,7 @@ class AntiCheat {
       this.strike(id, `teleport`, AC_CFG.STRIKE_SEVERE)
       return { x: prev.x, y: prev.y }
     }
-    const maxD = CFG.SPEED * dt * AC_CFG.SPEED_TOLERANCE + 8
+    const maxD = (speedLimit || CFG.SPEED) * dt * AC_CFG.SPEED_TOLERANCE + 12
     if (dist > maxD) {
       this.strike(id, `speed`, 1)
       const k = maxD / dist
@@ -817,37 +858,7 @@ class AntiCheat {
 }
 
 /* ============================================================
-   7. LAG COMP
-   ============================================================ */
-function hostSimulateShot(ac, shooterId, shooterPos, aim, targets, walls){
-  const { x, y } = shooterPos
-  const len = Math.hypot(aim[0], aim[1]) || 1
-  const ax = aim[0]/len, ay = aim[1]/len
-  ac.recordAim(shooterId, ax, ay, performance.now())
-  const p = ac.ensure(shooterId)
-  const rewindMs = Math.min(p.rtt, AC_CFG.MAX_REWIND_MS)
-  let bestHit = null, bestDist = Infinity
-  for (const tid in targets){
-    if (tid === shooterId) continue
-    const t = targets[tid]
-    if (t.dead) continue
-    const rw = ac.rewindPosition(tid, rewindMs)
-    const tx = rw ? rw.x : t.x
-    const ty = rw ? rw.y : t.y
-    if (!lineOfSight(x, y, tx, ty, walls)) continue
-    const dx = tx - x, dy = ty - y
-    const proj = dx*ax + dy*ay
-    if (proj < 0 || proj > CFG.BULLET_SPEED * CFG.BULLET_LIFE) continue
-    const px = x + ax*proj, py = y + ay*proj
-    const miss = Math.hypot(tx-px, ty-py)
-    if (miss < CFG.PLAYER_R && proj < bestDist){ bestDist = proj; bestHit = tid }
-  }
-  ac.recordShot(shooterId, !!bestHit)
-  return bestHit
-}
-
-/* ============================================================
-   8. КАРТА
+   7. MAP
    ============================================================ */
 const SPAWNS = [
   {x:120,y:120},{x:CFG.W-120,y:120},
@@ -879,7 +890,7 @@ function generateWalls(seedStr){
 }
 
 /* ============================================================
-   9. BOOT SCENE
+   8. BOOT SCENE
    ============================================================ */
 class BootScene extends Phaser.Scene {
   constructor(){ super('Boot') }
@@ -888,8 +899,6 @@ class BootScene extends Phaser.Scene {
     this.load.image('bullet', 'bullet.png')
     this.load.image('wall',   'wall.png')
     this.load.image('floor',  'floor.png')
-
-    /* 🎵 Фоновая музыка */
     this.load.audio('bgm', ['music.mp3', 'music.ogg'])
 
     this.load.on('loaderror', file => {
@@ -910,7 +919,7 @@ class BootScene extends Phaser.Scene {
 }
 
 /* ============================================================
-   10. ИГРОВАЯ СЦЕНА
+   9. ИГРОВАЯ СЦЕНА
    ============================================================ */
 class GameScene extends Phaser.Scene {
   constructor(){ super('Game') }
@@ -921,7 +930,6 @@ class GameScene extends Phaser.Scene {
     this.myName = this.registry.get('playerName') || 'anon'
     this.sfx = this.registry.get('sfx')
 
-    /* Пол */
     this.floorSprite = this.add.tileSprite(0, 0, CFG.W, CFG.H, 'floor')
       .setOrigin(0).setDepth(-20).setTint(CFG.FLOOR_COLOR).setAlpha(CFG.FLOOR_TINT_ALPHA)
     if (CFG.FLOOR_GLOW){
@@ -929,7 +937,6 @@ class GameScene extends Phaser.Scene {
         .setBlendMode(Phaser.BlendModes.ADD).setDepth(-19)
     }
 
-    /* Стены */
     this.wallRects = generateWalls(this.roomId)
     this.wallSprites = []
     if (CFG.WALL_GLOW){
@@ -944,16 +951,13 @@ class GameScene extends Phaser.Scene {
         .setOrigin(0).setDepth(-10).setDisplaySize(r.w, r.h).setTintFill(CFG.WALL_COLOR))
     }
 
-    /* Камера */
     this.cameras.main.setBounds(0, 0, CFG.W, CFG.H)
     this.cameras.main.setBackgroundColor('#05070d')
     this.updateCameraZoom()
     this.scale.on('resize', () => this.updateCameraZoom())
 
-    /* 🎵 Музыка */
     this._setupMusic()
 
-    /* Состояние */
     this.views = {}
     this.ghostBullets = {}
     this.inputs = {}
@@ -977,6 +981,10 @@ class GameScene extends Phaser.Scene {
     this.lastPickupSpawn = 0
 
     this.localBonuses = [0, 0, 0, 0, 0]
+
+    /* DASH */
+    this.dash = { until:0, cdUntil:0, dirX:1, dirY:0 }
+    this.dashSeq = 0
 
     this.hostBlacklist = new Set()
     this.votes = new Map()
@@ -1010,6 +1018,12 @@ class GameScene extends Phaser.Scene {
     this.voteBtn.addEventListener('click', ()=> this.onVoteClick())
     this.soundBtn.addEventListener('click', ()=> this.toggleSound())
 
+    this.killfeedEl = document.getElementById('killfeed')
+    this.vignetteEl = document.getElementById('vignette')
+    this.dashBtn = document.getElementById('dashBtn')
+    this.dashBtn.style.display = ''
+    this._bindDashButton()
+
     this.setupJoysticks()
 
     this.myPeerId = 'local_' + randomToken(4)
@@ -1019,37 +1033,114 @@ class GameScene extends Phaser.Scene {
     this.setupNetwork()
   }
 
-  /* =========== 🎵 МУЗЫКА =========== */
+  /* =========== DASH =========== */
+  _bindDashButton(){
+    const fire = (e) => {
+      if (e){ e.preventDefault(); e.stopPropagation() }
+      this.tryDash()
+    }
+    this.dashBtn.addEventListener('pointerdown', fire)
+    this.dashBtn.addEventListener('contextmenu', e => e.preventDefault())
+  }
+
+  tryDash(){
+    const now = performance.now()
+    if (this.local.dead) return
+    if (now < this.dash.cdUntil) return
+
+    let dx = this.moveVec.x, dy = this.moveVec.y
+    if (Math.hypot(dx, dy) < 0.2){
+      dx = this.aimVec.x; dy = this.aimVec.y
+    }
+    const len = Math.hypot(dx, dy) || 1
+    this.dash.dirX = dx/len
+    this.dash.dirY = dy/len
+    this.dash.until = now + CFG.DASH_DURATION
+    this.dash.cdUntil = now + CFG.DASH_CD
+    this.dashSeq++
+
+    this.sfx.dash(0, 1)
+    this.cameras.main.shake(90, 0.0035)
+    this._spawnDashTrail()
+  }
+
+  _spawnDashTrail(){
+    const me = this.views[this.myPeerId]
+    if (!me) return
+    const g = this.add.graphics().setDepth(8)
+    g.fillStyle(0xff2266, 0.6)
+    g.fillCircle(me.sprite.x - this.dash.dirX * 6,
+                 me.sprite.y - this.dash.dirY * 6, CFG.PLAYER_R * 0.85)
+    this.tweens.add({
+      targets: g, alpha: 0, scale: 1.6, duration: 260,
+      onComplete: () => g.destroy(),
+    })
+  }
+
+  updateDashButton(){
+    if (!this.dashBtn) return
+    const now = performance.now()
+    const onCd = now < this.dash.cdUntil
+    const dead = this.local.dead
+    const locked = onCd || dead
+    this.dashBtn.classList.toggle('cooling', locked)
+    if (onCd){
+      this.dashBtn.textContent = Math.ceil((this.dash.cdUntil - now)/1000) + 's'
+    } else {
+      this.dashBtn.textContent = '⚡'
+    }
+  }
+
+  /* =========== KILLFEED =========== */
+  addKillFeed(killerName, victimName, isMine, weaponEmoji){
+    if (!this.killfeedEl) return
+    const el = document.createElement('div')
+    el.className = 'kf' + (isMine ? ' mine' : '')
+    el.innerHTML =
+      `<span class="who">${escapeHtml(killerName)}</span>` +
+      `<span class="wp">${weaponEmoji}</span>` +
+      `<span class="vic">${escapeHtml(victimName)}</span>`
+    this.killfeedEl.appendChild(el)
+    while (this.killfeedEl.children.length > 5){
+      this.killfeedEl.removeChild(this.killfeedEl.firstChild)
+    }
+    setTimeout(() => {
+      if (!el.parentNode) return
+      el.style.transition = 'opacity .4s, transform .4s'
+      el.style.opacity = '0'
+      el.style.transform = 'translateX(-24px)'
+      setTimeout(() => el.remove(), 450)
+    }, 5000)
+  }
+
+  flashVignette(){
+    if (!this.vignetteEl) return
+    this.vignetteEl.style.transition = 'opacity .08s'
+    this.vignetteEl.style.opacity = '1'
+    setTimeout(() => {
+      this.vignetteEl.style.transition = 'opacity .6s'
+      this.vignetteEl.style.opacity = '0'
+    }, 110)
+  }
+
+  /* =========== МУЗЫКА =========== */
   _setupMusic(){
     try {
       if (!this.cache.audio.exists('bgm')){
-        DBG.warn('BGM', 'music.mp3 не найден — музыки не будет')
+        DBG.warn('BGM', 'music.mp3 не найден')
         return
       }
-      this.bgm = this.sound.add('bgm', {
-        loop: true,
-        volume: CFG.BGM_VOLUME,
-      })
-
+      this.bgm = this.sound.add('bgm', { loop: true, volume: CFG.BGM_VOLUME })
       const tryPlay = () => {
         if (!this.sfx.enabled) return
         if (this.bgm && !this.bgm.isPlaying){
           try { this.bgm.play() } catch(e){}
         }
       }
-
-      /* Phaser sound.locked: true если требуется user gesture */
       const isLocked = this.sound && this.sound.locked
-      if (isLocked){
-        this.sound.once('unlocked', tryPlay)
-      } else {
-        tryPlay()
-      }
-
-      DBG.log('BGM', 'музыка загружена')
-    } catch(e){
-      DBG.warn('BGM', 'ошибка инициализации:', e)
-    }
+      if (isLocked) this.sound.once('unlocked', tryPlay)
+      else tryPlay()
+    } catch(e){}
   }
 
   toggleSound(){
@@ -1063,7 +1154,7 @@ class GameScene extends Phaser.Scene {
         } else {
           this.bgm.pause()
         }
-      } catch(e){ DBG.warn('BGM', 'toggle error:', e) }
+      } catch(e){}
     }
   }
 
@@ -1114,17 +1205,18 @@ class GameScene extends Phaser.Scene {
     return { pan, vol }
   }
 
+  /* 🆕 _computeFireBehavior — sprayer вместо oneshot */
   _computeFireBehavior(bonuses, now){
     const rapid = bonuses[0] > now
     const homing = bonuses[1] > now
     const ricochet = bonuses[2] > now
-    const oneshot = bonuses[4] > now
+    const sprayer = bonuses[4] > now
 
-    if (oneshot){
+    if (sprayer){
       return {
-        fireCd: CFG.BONUS_ONESHOT_FIRE_CD,
-        opts: { homing: false, ricochet: 0, oneshot: true },
-        kind: 'oneshot',
+        fireCd: CFG.BONUS_SPRAYER_FIRE_CD,
+        opts: { homing: false, ricochet: 0, sprayer: true },
+        kind: 'sprayer',
       }
     }
 
@@ -1135,7 +1227,7 @@ class GameScene extends Phaser.Scene {
     const opts = {
       homing: homing,
       ricochet: ricochet ? CFG.BONUS_RICOCHET_MAX : 0,
-      oneshot: false,
+      sprayer: false,
     }
     let kind = 'normal'
     if (homing && ricochet) kind = 'homingRicochet'
@@ -1330,7 +1422,7 @@ class GameScene extends Phaser.Scene {
     }
     const owner = this.views[data.owner]
     let kind = 'normal'
-    if (data.oneshot) kind = 'oneshot'
+    if (data.sprayer) kind = 'sprayer'
     else if (data.homing && data.ricochet) kind = 'homingRicochet'
     else if (data.homing) kind = 'homing'
     else if (data.ricochet) kind = 'ricochet'
@@ -1441,7 +1533,8 @@ class GameScene extends Phaser.Scene {
   }
 
   spawnPickup(){
-    const types = ['hp','rapid','homing','ricochet','shield','oneshot']
+    /* 🆕 'oneshot' → 'sprayer' */
+    const types = ['hp','rapid','homing','ricochet','shield','sprayer']
     const type = types[Math.floor(Math.random()*types.length)]
     let x, y, tries = 0
     do {
@@ -1471,8 +1564,9 @@ class GameScene extends Phaser.Scene {
       p.bonuses.ricochetUntil = now + CFG.BONUS_DURATION
     } else if (type === 'shield'){
       p.bonuses.shieldHits = (p.bonuses.shieldHits || 0) + 1
-    } else if (type === 'oneshot'){
-      p.bonuses.oneshotUntil = now + CFG.BONUS_DURATION
+    } else if (type === 'sprayer'){
+      /* 🆕 */
+      p.bonuses.sprayerUntil = now + CFG.BONUS_DURATION
     }
     if (id === this.myPeerId){
       this.sfx.pickup(type, 0, 1)
@@ -1483,7 +1577,8 @@ class GameScene extends Phaser.Scene {
   }
 
   resetBonuses(p){
-    p.bonuses = { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, oneshotUntil:0 }
+    /* 🆕 oneshotUntil → sprayerUntil */
+    p.bonuses = { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 }
   }
 
   syncPickups(list){
@@ -1493,7 +1588,8 @@ class GameScene extends Phaser.Scene {
       const [id, type, x, y] = list[i]
       seen.add(id)
       if (!this.pickupSprites[id]){
-        const emoji = { hp:'❤️', rapid:'⚡', homing:'🎯', ricochet:'🏓', shield:'🛡', oneshot:'💀' }[type] || '❓'
+        /* 🆕 💀 → 💦 */
+        const emoji = { hp:'❤️', rapid:'⚡', homing:'🎯', ricochet:'🏓', shield:'🛡', sprayer:'💦' }[type] || '❓'
         const t = this.add.text(x, y, emoji, { fontSize: '32px', fontFamily: 'monospace' })
           .setOrigin(0.5).setDepth(6).setAlpha(0.9)
         t.setData('type', type)
@@ -1534,7 +1630,8 @@ class GameScene extends Phaser.Scene {
       y: (v && v.init && (v.tx||v.ty)) ? v.ty : spawn.y,
       vx:0, vy:0, aimX:1, aimY:0,
       hp: CFG.MAX_HP, dead:false, fireAt:0, respawnAt:0, score:0,
-      bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, oneshotUntil:0 },
+      bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 },
+      dashUntil: 0, dashDirX: 1, dashDirY: 0, lastDseq: 0,
     }
     if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
   }
@@ -1555,7 +1652,8 @@ class GameScene extends Phaser.Scene {
         vx:0, vy:0, aimX:1, aimY:0,
         hp: v ? v.hp : CFG.MAX_HP, dead: v ? v.dead : false,
         fireAt:0, respawnAt:0, score:0,
-        bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, oneshotUntil:0 },
+        bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 },
+        dashUntil: 0, dashDirX: 1, dashDirY: 0, lastDseq: 0,
       }
       if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
     }
@@ -1652,7 +1750,8 @@ class GameScene extends Phaser.Scene {
     const now = performance.now()
     const parts = []
     if (bn[4] > now){
-      parts.push(`💀 ${Math.ceil((bn[4]-now)/1000)}s`)
+      /* 🆕 💦 вместо 💀 */
+      parts.push(`💦 ${Math.ceil((bn[4]-now)/1000)}s`)
     } else {
       if (bn[0] > now) parts.push(`⚡ ${Math.ceil((bn[0]-now)/1000)}s`)
       if (bn[1] > now) parts.push(`🎯 ${Math.ceil((bn[1]-now)/1000)}s`)
@@ -1762,17 +1861,20 @@ class GameScene extends Phaser.Scene {
   spawnGhostBullet(d){
     if (this.ghostBullets[d.id]) return
     let color = 0xffe066
-    if (d.oneshot) color = 0xff2244
+    /* 🆕 sprayer цвет — оранжевый */
+    if (d.sprayer) color = 0xffaa33
     else if (d.homing && d.ricochet) color = 0xff22ff
     else if (d.homing) color = 0xff66ff
     else if (d.ricochet) color = 0x22ffff
+    const size = d.sprayer ? CFG.BULLET_SIZE * 0.7 : CFG.BULLET_SIZE
     const s = this.add.image(d.x, d.y, 'bullet')
-      .setDisplaySize(CFG.BULLET_SIZE, CFG.BULLET_SIZE)
+      .setDisplaySize(size, size)
       .setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(5)
     this.ghostBullets[d.id] = {
       sprite: s, vx: d.vx, vy: d.vy, born: this.time.now,
       bouncesLeft: d.ricochet || 0,
       homing: !!d.homing,
+      sprayer: !!d.sprayer,
     }
   }
 
@@ -1811,7 +1913,11 @@ class GameScene extends Phaser.Scene {
         this.local.hp = d.hp
         this.local.dead = !!d.dead
         this.cameras.main.flash(90, 255, 30, 100)
-        if (d.dead) this.localBonuses = [0, 0, 0, 0, 0]
+        if (d.dead){
+          this.localBonuses = [0, 0, 0, 0, 0]
+          this.dash.cdUntil = 0
+          this.dash.until = 0
+        }
       }
     }
     const v = this.views[d.target]
@@ -1824,6 +1930,19 @@ class GameScene extends Phaser.Scene {
       })
     }
     if (byMe) this.cameras.main.shake(50, 0.002)
+
+    /* KILLFEED */
+    if (d.dead && d.killed){
+      const killerName = this.peerNames[d.by] || (d.by || '?').slice(0,6)
+      const victimName = this.peerNames[d.target] || (d.target || '?').slice(0,6)
+      /* 🆕 проверяем sprayer */
+      const weapon = d.sprayer ? '💦' : '🔫'
+      this.addKillFeed(killerName, victimName, byMe, weapon)
+      if (byMe){
+        this.flashVignette()
+        this.cameras.main.shake(90, 0.004)
+      }
+    }
   }
 
   createView(id){
@@ -1860,9 +1979,17 @@ class GameScene extends Phaser.Scene {
     }
     if (this.voteActive) this.checkVoteResult()
 
+    /* движение с учётом dash */
     if (!this.local.dead){
-      const nx = this.predicted.x + this.moveVec.x * CFG.SPEED * dt
-      const ny = this.predicted.y + this.moveVec.y * CFG.SPEED * dt
+      const now = performance.now()
+      let speed = CFG.SPEED
+      let mx = this.moveVec.x, my = this.moveVec.y
+      if (now < this.dash.until){
+        mx = this.dash.dirX; my = this.dash.dirY
+        speed = CFG.DASH_SPEED
+      }
+      const nx = this.predicted.x + mx * speed * dt
+      const ny = this.predicted.y + my * speed * dt
       const p = this.resolveWorld(nx, ny)
       this.predicted.x = p.x; this.predicted.y = p.y
     }
@@ -1897,6 +2024,7 @@ class GameScene extends Phaser.Scene {
           a: [this.aimVec.x, this.aimVec.y],
           f: this.firing ? 1 : 0,
           d: this.local.dead ? 1 : 0,
+          dseq: this.dashSeq,
         }
         payload.sig = this.ac.sign(payload)
         this.sendInput(payload, hostId)
@@ -1909,6 +2037,7 @@ class GameScene extends Phaser.Scene {
         a: [this.aimVec.x, this.aimVec.y],
         f: this.firing ? 1 : 0,
         d: this.local.dead ? 1 : 0,
+        dseq: this.dashSeq,
         _t: time,
       }
       this.simulateHost(time, dt)
@@ -1922,19 +2051,25 @@ class GameScene extends Phaser.Scene {
         const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
         const ax = this.aimVec.x / len
         const ay = this.aimVec.y / len
-        const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
         this.sfx.shoot(behavior.kind, 0, 1)
-        this.spawnGhostBullet({
-          id,
-          x: this.local.x + ax * (CFG.PLAYER_R + 6),
-          y: this.local.y + ay * (CFG.PLAYER_R + 6),
-          vx: ax * CFG.BULLET_SPEED,
-          vy: ay * CFG.BULLET_SPEED,
-          owner: this.myPeerId,
-          homing: behavior.opts.homing,
-          ricochet: behavior.opts.ricochet,
-          oneshot: behavior.opts.oneshot,
-        })
+
+        /* 🆕 распылитель локально — много пуль */
+        if (behavior.opts.sprayer){
+          this.spawnLocalSprayer(ax, ay)
+        } else {
+          const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
+          this.spawnGhostBullet({
+            id,
+            x: this.local.x + ax * (CFG.PLAYER_R + 6),
+            y: this.local.y + ay * (CFG.PLAYER_R + 6),
+            vx: ax * CFG.BULLET_SPEED,
+            vy: ay * CFG.BULLET_SPEED,
+            owner: this.myPeerId,
+            homing: behavior.opts.homing,
+            ricochet: behavior.opts.ricochet,
+            sprayer: false,
+          })
+        }
       }
     }
 
@@ -1945,6 +2080,32 @@ class GameScene extends Phaser.Scene {
       this.updateVoteUI()
       this.renderScores()
       this.renderBonuses()
+      this.updateDashButton()
+    }
+  }
+
+  /* 🆕 локальное предсказание распылителя */
+  spawnLocalSprayer(ax, ay){
+    const baseAngle = Math.atan2(ay, ax)
+    const spread = CFG.BONUS_SPRAYER_SPREAD_DEG * Math.PI / 180
+    const n = CFG.BONUS_SPRAYER_PELLETS
+    for (let i = 0; i < n; i++){
+      const t = n === 1 ? 0.5 : i / (n - 1)
+      const jitter = (Math.random() - 0.5) * 0.04
+      const ang = baseAngle - spread/2 + spread * t + jitter
+      const pa = Math.cos(ang), pb = Math.sin(ang)
+      const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
+      this.spawnGhostBullet({
+        id,
+        x: this.local.x + pa * (CFG.PLAYER_R + 6),
+        y: this.local.y + pb * (CFG.PLAYER_R + 6),
+        vx: pa * CFG.BULLET_SPEED,
+        vy: pb * CFG.BULLET_SPEED,
+        owner: this.myPeerId,
+        homing: false,
+        ricochet: 0,
+        sprayer: true,
+      })
     }
   }
 
@@ -1969,22 +2130,54 @@ class GameScene extends Phaser.Scene {
         inp = { m:[0,0], a: inp.a || [1,0], f: 0 }
       }
       if (!p.bonuses) this.resetBonuses(p)
+      if (typeof p.dashUntil !== 'number') p.dashUntil = 0
+      if (typeof p.lastDseq !== 'number') p.lastDseq = 0
+
+      /* DASH от игрока */
+      if (inp.dseq && inp.dseq > p.lastDseq){
+        p.lastDseq = inp.dseq
+        if (!p.dead){
+          let dx = inp.m[0] || 0, dy = inp.m[1] || 0
+          if (Math.hypot(dx, dy) < 0.2){
+            dx = inp.a[0] || 1; dy = inp.a[1] || 0
+          }
+          const len = Math.hypot(dx, dy) || 1
+          p.dashDirX = dx/len
+          p.dashDirY = dy/len
+          p.dashUntil = time + CFG.DASH_DURATION
+          if (id !== this.myPeerId){
+            const sp = this._spatial(p.x, p.y, 0.9)
+            this.sfx.dash(sp.pan, sp.vol)
+          }
+        }
+      }
 
       if (p.dead){
         if (time > p.respawnAt){
           const sp = SPAWNS[Math.floor(Math.random()*SPAWNS.length)]
           p.x = sp.x; p.y = sp.y; p.hp = CFG.MAX_HP; p.dead = false; p.vx = 0; p.vy = 0
+          p.dashUntil = 0
           this.resetBonuses(p)
           if (id === this.myPeerId) this.sfx.respawn(0, 1)
         } else continue
       }
 
       const prev = { x:p.x, y:p.y }
-      p.vx = (inp.m[0]||0) * CFG.SPEED
-      p.vy = (inp.m[1]||0) * CFG.SPEED
+      let speed = CFG.SPEED
+      let mvx = inp.m[0] || 0
+      let mvy = inp.m[1] || 0
+      const dashing = time < p.dashUntil
+      if (dashing){
+        mvx = p.dashDirX
+        mvy = p.dashDirY
+        speed = CFG.DASH_SPEED
+      }
+
+      p.vx = mvx * speed
+      p.vy = mvy * speed
       const nx = p.x + p.vx*dt, ny = p.y + p.vy*dt
       const res = this.resolveWorld(nx, ny)
-      const fixed = this.ac.validateMovement(id, prev, res, dt)
+      const fixed = this.ac.validateMovement(id, prev, res, dt, speed)
       p.x = fixed.x; p.y = fixed.y
       this.ac.recordPosition(id, p.x, p.y)
       p.aimX = inp.a[0] || 1
@@ -1995,7 +2188,7 @@ class GameScene extends Phaser.Scene {
         p.bonuses.homingUntil || 0,
         p.bonuses.ricochetUntil || 0,
         p.bonuses.shieldHits || 0,
-        p.bonuses.oneshotUntil || 0,
+        p.bonuses.sprayerUntil || 0,
       ]
       const behavior = this._computeFireBehavior(bnArr, now)
 
@@ -2012,7 +2205,12 @@ class GameScene extends Phaser.Scene {
           this.sfx.shoot(behavior.kind, sp.pan, sp.vol)
         }
 
-        this.hostSpawnBullet(id, p.x, p.y, ax, ay, behavior.opts)
+        /* 🆕 распылитель → много пуль */
+        if (behavior.opts.sprayer){
+          this.hostSpawnSprayer(id, p.x, p.y, ax, ay)
+        } else {
+          this.hostSpawnBullet(id, p.x, p.y, ax, ay, behavior.opts)
+        }
       }
 
       for (let i = this.pickups.length - 1; i >= 0; i--){
@@ -2116,18 +2314,24 @@ class GameScene extends Phaser.Scene {
             t.bonuses.shieldHits--
             blocked = true
           } else {
-            const dmg = b.oneshot ? CFG.BONUS_ONESHOT_DAMAGE : CFG.DAMAGE
+            /* 🆕 используем b.damage вместо oneshot */
+            const dmg = (typeof b.damage === 'number') ? b.damage : CFG.DAMAGE
             t.hp -= dmg
           }
           let killed = false
           if (!blocked && t.hp <= 0){
             t.hp = 0; t.dead = true; t.respawnAt = time + CFG.RESPAWN
+            t.dashUntil = 0
             killed = true
             this.resetBonuses(t)
             const shooter = this.worldPlayers[b.owner]
             if (shooter) shooter.score = (shooter.score || 0) + 1
           }
-          const hd = { bid: b.id, target: tid, by: b.owner, hp: t.hp, dead: t.dead, killed, blocked }
+          /* 🆕 передаём sprayer-флаг для килфида */
+          const hd = {
+            bid: b.id, target: tid, by: b.owner, hp: t.hp,
+            dead: t.dead, killed, blocked, sprayer: !!b.sprayer,
+          }
           this.sendHit(hd)
           this.applyHit(hd)
           this.bullets.splice(i, 1)
@@ -2175,7 +2379,7 @@ class GameScene extends Phaser.Scene {
         for (const id of visible){
           const w = this.worldPlayers[id]
           if (!w) continue
-          const bn = w.bonuses || { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, oneshotUntil:0 }
+          const bn = w.bonuses || { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 }
           pack[id] = [
             Math.round(w.x), Math.round(w.y),
             Math.round(w.aimX*100)/100, Math.round(w.aimY*100)/100,
@@ -2185,7 +2389,7 @@ class GameScene extends Phaser.Scene {
               Math.max(0, Math.round((bn.homingUntil||0) - now)),
               Math.max(0, Math.round((bn.ricochetUntil||0) - now)),
               bn.shieldHits || 0,
-              Math.max(0, Math.round((bn.oneshotUntil||0) - now)),
+              Math.max(0, Math.round((bn.sprayerUntil||0) - now)),
             ],
           ]
         }
@@ -2209,15 +2413,52 @@ class GameScene extends Phaser.Scene {
       owner: ownerId, born: this.time.now,
       homing: !!opts.homing,
       bouncesLeft: opts.ricochet || 0,
-      oneshot: !!opts.oneshot,
+      damage: CFG.DAMAGE,     /* 🆕 всегда свой урон */
+      sprayer: false,          /* 🆕 */
     }
     this.bullets.push(b)
     const payload = {
       id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, owner: ownerId,
-      homing: b.homing, ricochet: b.bouncesLeft, oneshot: b.oneshot,
+      homing: b.homing, ricochet: b.bouncesLeft, sprayer: false,
     }
     this.sendBullet(payload)
     this.spawnGhostBullet(payload)
+  }
+
+  /* 🆕 распылитель — 7 пуль веером */
+  hostSpawnSprayer(ownerId, x, y, ax, ay){
+    const baseAngle = Math.atan2(ay, ax)
+    const spread = CFG.BONUS_SPRAYER_SPREAD_DEG * Math.PI / 180
+    const n = CFG.BONUS_SPRAYER_PELLETS
+    const dmg = CFG.DAMAGE * CFG.BONUS_SPRAYER_DAMAGE_MUL
+
+    for (let i = 0; i < n; i++){
+      const t = n === 1 ? 0.5 : i / (n - 1)
+      const jitter = (Math.random() - 0.5) * 0.04
+      const ang = baseAngle - spread/2 + spread * t + jitter
+      const pa = Math.cos(ang), pb = Math.sin(ang)
+
+      const id = this.myPeerId + '-' + (++this.bulletSeq)
+      const b = {
+        id,
+        x: x + pa * (CFG.PLAYER_R + 6),
+        y: y + pb * (CFG.PLAYER_R + 6),
+        vx: pa * CFG.BULLET_SPEED,
+        vy: pb * CFG.BULLET_SPEED,
+        owner: ownerId, born: this.time.now,
+        homing: false,
+        bouncesLeft: 0,
+        damage: dmg,          /* 🆕 половинный урон */
+        sprayer: true,
+      }
+      this.bullets.push(b)
+      const payload = {
+        id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, owner: ownerId,
+        homing: false, ricochet: 0, sprayer: true,
+      }
+      this.sendBullet(payload)
+      this.spawnGhostBullet(payload)
+    }
   }
 
   updateGhostBullets(time, dt){
@@ -2396,13 +2637,11 @@ class GameScene extends Phaser.Scene {
 }
 
 /* ============================================================
-   11. СТАРТ — с внешним таймаутом
+   10. СТАРТ
    ============================================================ */
 ;(async ()=>{
   const identity = new Identity()
 
-  /* 🆕 Инициализация identity с внешним таймаутом 4с,
-     чтобы игра запустилась, даже если WebCrypto завис */
   try {
     await Promise.race([
       identity.init(),
@@ -2424,7 +2663,6 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  /* Отображаем результат identity */
   try {
     document.getElementById('pid').textContent =
       `identity: ${identity.mode} · id: ${identity.pubHash}`
@@ -2432,10 +2670,8 @@ class GameScene extends Phaser.Scene {
 
   DBG.log('BOOT', 'identity ready:', identity.mode)
 
-  /* Sound engine */
   const sfx = new SoundEngine()
 
-  /* Обработчик кнопки ИГРАТЬ */
   document.getElementById('playBtn').addEventListener('click', ()=>{
     const code = (document.getElementById('roomInput').value || 'arena1').trim()
     const rawName = (document.getElementById('nameInput').value || '').trim()
@@ -2446,9 +2682,7 @@ class GameScene extends Phaser.Scene {
     try {
       sfx.init()
       sfx.startAmbient()
-    } catch(e){
-      DBG.warn('BOOT', 'sfx init failed', e)
-    }
+    } catch(e){}
 
     new Phaser.Game({
       type: Phaser.AUTO,
@@ -2473,4 +2707,4 @@ class GameScene extends Phaser.Scene {
 })()
 </script>
 </body>
-  </html>
+</html>
