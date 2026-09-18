@@ -1,59 +1,88 @@
-// server_lobbies.js
-const WebSocket = require('ws');
-const crypto = require('crypto');
-const http = require('http');
+// ============================================================
+// server.js — WebSocket relay + MaxAC + Lobbies
+// ============================================================
+const { WebSocketServer } = require('ws');
+const fs = require('fs');
 
-const PORT = process.env.PORT || 8080;
-const wss = new WebSocket.Server({ port: PORT });
+const port = process.env.PORT || 3000;
+const wss = new WebSocketServer({
+  port,
+  maxPayload: 4096
+});
+
+const AC = {
+  MAX_PACKET_BYTES: 2000,
+  MAX_MSG_PER_SEC: 60,
+  MAX_ROOMS: 200,
+  MAX_CLIENTS_PER_ROOM: 12,
+  MAX_SEQ_GAP: 500,
+
+  STRIKE_DECAY_MS: 60000,
+  STRIKE_KICK: 8,
+  STRIKE_SEVERE: 3,
+
+  BAN_FILE: './bans.json',
+  IP_BAN_MS: 60 * 60 * 1000,
+  MAX_BANS_PER_IP: 3
+};
 
 const rooms = new Map();
 const roomHost = new Map();
-const roomMeta = new Map();
 const clients = new Map();
 
-const AC = {
-  MAX_CLIENTS: 1000,
-  MAX_CLIENTS_PER_ROOM: 12,
-  MAX_ROOMS: 100,
-  MAX_MSG: 64 * 1024,
-};
+const bannedHashes = new Set();
+const ipStrikes = new Map();
+const ipBanList = new Map();
 
-function cleanLobbyName(s){
-  return String(s || '')
-    .replace(/[<>&"'`]/g, '')
+// Данные лобби
+const roomMeta = new Map();
+
+
+// ============================================================
+// LOBBIES
+// ============================================================
+
+function cleanLobbyName(name) {
+  return String(name || '')
+    .replace(/[<>]/g, '')
     .trim()
-    .slice(0, 24);
+    .slice(0, 32) || 'Без названия';
 }
 
-function makeRoomId(){
-  let id = '';
+function makeRoomId() {
+  let id;
+
   do {
-    id = 'room_' + Math.random().toString(36).slice(2, 8);
+    id = 'room_' + Math.random()
+      .toString(36)
+      .slice(2, 8);
   } while (rooms.has(id));
 
   return id;
 }
 
-function lobbyList(){
-  return [...rooms.entries()]
-    .map(([id, room]) => {
-      const meta = roomMeta.get(id) || {
-        name: id,
-        private: false
-      };
+function lobbyList() {
+  const out = [];
 
-      return {
-        id,
-        name: meta.name || id,
-        private: !!meta.private,
-        players: room.size,
-        maxPlayers: AC.MAX_CLIENTS_PER_ROOM
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+  for (const [id, room] of rooms) {
+    const meta = roomMeta.get(id) || {
+      name: id,
+      private: false
+    };
+
+    out.push({
+      id,
+      name: meta.name,
+      private: !!meta.private,
+      players: room.size,
+      maxPlayers: AC.MAX_CLIENTS_PER_ROOM
+    });
+  }
+
+  return out;
 }
 
-function sendLobbyList(ws){
+function sendLobbyList(ws) {
   try {
     ws.send(JSON.stringify({
       type: 'lobbies',
@@ -62,239 +91,472 @@ function sendLobbyList(ws){
   } catch {}
 }
 
-function broadcastLobbyList(){
-  for (const ws of wss.clients){
-    if (ws.readyState === WebSocket.OPEN){
+function broadcastLobbyList() {
+  for (const ws of wss.clients) {
+    if (ws.readyState === 1) {
       sendLobbyList(ws);
     }
   }
 }
 
-function send(ws, data){
-  if (ws.readyState === WebSocket.OPEN){
-    ws.send(JSON.stringify(data));
+
+// ============================================================
+// SECURITY / VALIDATION
+// ============================================================
+
+function safeParse(raw) {
+  if (!raw) return null;
+
+  const str = raw.toString();
+
+  if (str.length > AC.MAX_PACKET_BYTES) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(str);
+  } catch {
+    return null;
   }
 }
 
-function broadcastRoom(roomId, data, except = null){
-  const room = rooms.get(roomId);
-  if (!room) return;
+function validateVec(v) {
+  return Array.isArray(v) &&
+    v.length === 2 &&
+    Number.isFinite(v[0]) &&
+    Number.isFinite(v[1]) &&
+    Math.abs(v[0]) <= 1.5 &&
+    Math.abs(v[1]) <= 1.5;
+}
 
-  for (const peerId of room){
-    const c = clients.get(peerId);
+function validateInputPayload(d) {
+  if (!d || typeof d !== 'object') {
+    return false;
+  }
 
-    if (
-      c &&
-      c.ws.readyState === WebSocket.OPEN &&
-      c.ws !== except
-    ){
-      c.ws.send(JSON.stringify(data));
+  if (!validateVec(d.m) || !validateVec(d.a)) {
+    return false;
+  }
+
+  if (d.f !== 0 && d.f !== 1) {
+    return false;
+  }
+
+  if (typeof d.seq !== 'number' ||
+      !Number.isFinite(d.seq)) {
+    return false;
+  }
+
+  if (d.seq < 0 || d.seq > 1e9) {
+    return false;
+  }
+
+  return true;
+}
+
+
+// ============================================================
+// BANS
+// ============================================================
+
+function loadBans() {
+  try {
+    if (fs.existsSync(AC.BAN_FILE)) {
+      const arr = JSON.parse(
+        fs.readFileSync(AC.BAN_FILE, 'utf8')
+      );
+
+      if (Array.isArray(arr)) {
+        for (const h of arr) {
+          bannedHashes.add(h);
+        }
+      }
+
+      console.log(
+        `[AC] loaded ${bannedHashes.size} bans`
+      );
     }
+  } catch (e) {}
+}
+
+function saveBans() {
+  try {
+    fs.writeFileSync(
+      AC.BAN_FILE,
+      JSON.stringify([...bannedHashes])
+    );
+  } catch {}
+}
+
+loadBans();
+
+
+// ============================================================
+// CLIENTS
+// ============================================================
+
+function ensureClient(ws, ip) {
+  let c = clients.get(ws.peerId);
+
+  if (!c) {
+    c = {
+      peerId: ws.peerId,
+      ws,
+      ip,
+
+      strikes: 0,
+      lastStrike: 0,
+
+      msgTimes: [],
+
+      seq: -1,
+
+      pubHash: null,
+      verified: false,
+
+      joinedAt: Date.now(),
+      room: null
+    };
+
+    clients.set(ws.peerId, c);
+  }
+
+  return c;
+}
+
+function decay(c) {
+  const now = Date.now();
+
+  if (
+    c.strikes > 0 &&
+    now - c.lastStrike > AC.STRIKE_DECAY_MS
+  ) {
+    c.strikes--;
+    c.lastStrike = now;
   }
 }
 
-function removeClient(c){
+function strike(c, reason, weight = 1) {
+  c.strikes += weight;
+  c.lastStrike = Date.now();
+
+  console.warn(
+    `[AC] strike ${c.peerId?.slice(0, 8)} ` +
+    `"${reason}" (+${weight}) = ${c.strikes}`
+  );
+
+  if (c.strikes >= AC.STRIKE_KICK) {
+    banClient(c, `strikes: ${reason}`);
+    return false;
+  }
+
+  return true;
+}
+
+function banClient(c, reason) {
+  if (c.pubHash) {
+    bannedHashes.add(c.pubHash);
+    saveBans();
+  }
+
+  console.warn(
+    `[AC] BAN peer=${c.peerId?.slice(0, 8)} ` +
+    `reason="${reason}"`
+  );
+
+  try {
+    c.ws.send(JSON.stringify({
+      type: 'banned',
+      reason
+    }));
+  } catch {}
+
+  try {
+    c.ws.close(1008, 'banned');
+  } catch {}
+}
+
+function checkRate(c) {
+  const now = Date.now();
+
+  c.msgTimes.push(now);
+
+  while (
+    c.msgTimes.length &&
+    now - c.msgTimes[0] > 1000
+  ) {
+    c.msgTimes.shift();
+  }
+
+  if (c.msgTimes.length > AC.MAX_MSG_PER_SEC) {
+    return strike(
+      c,
+      'rate',
+      AC.STRIKE_SEVERE
+    );
+  }
+
+  return true;
+}
+
+
+// ============================================================
+// CLEANUP
+// ============================================================
+
+function cleanupClient(ws, reason) {
+  const c = clients.get(ws.peerId);
+
   if (!c) return;
 
   const roomId = c.room;
 
-  if (roomId && rooms.has(roomId)){
-    const room = rooms.get(roomId);
-
-    room.delete(c.peerId);
-
-    if (roomHost.get(roomId) === c.peerId){
-      const nextHost = [...room][0];
-
-      if (nextHost){
-        roomHost.set(roomId, nextHost);
-
-        broadcastRoom(roomId, {
-          type: 'host',
-          peerId: nextHost
-        });
-      } else {
-        roomHost.delete(roomId);
-      }
-    }
-
-    if (room.size === 0){
-      rooms.delete(roomId);
-      roomHost.delete(roomId);
-      roomMeta.delete(roomId);
-    }
-  }
-
-  clients.delete(c.peerId);
-  broadcastLobbyList();
-}
-
-wss.on('connection', (ws, req) => {
-
-  if (clients.size >= AC.MAX_CLIENTS){
-    send(ws, {
-      type: 'error',
-      msg: 'server full'
-    });
-
-    ws.close();
+  if (!roomId) {
+    clients.delete(c.peerId);
+    broadcastLobbyList();
     return;
   }
 
-  const peerId = crypto.randomBytes(8).toString('hex');
+  const room = rooms.get(roomId);
 
-  const c = {
-    ws,
-    peerId,
-    room: null,
-    alive: true,
-    joinedAt: Date.now()
-  };
+  if (!room) {
+    clients.delete(c.peerId);
+    broadcastLobbyList();
+    return;
+  }
 
-  clients.set(peerId, c);
+  room.delete(ws);
 
-  send(ws, {
-    type: 'hello',
-    peerId
-  });
+  // Сообщаем остальным, что игрок вышел
+  for (const peer of room) {
+    if (peer.readyState === 1) {
+      try {
+        peer.send(JSON.stringify({
+          type: 'peer-leave',
+          peerId: c.peerId
+        }));
+      } catch {}
+    }
+  }
 
-  ws.on('pong', () => {
-    c.alive = true;
-  });
+  // Если вышел хост — назначаем нового
+  if (roomHost.get(roomId) === c.peerId) {
+    const remaining = [...room];
+
+    if (remaining.length) {
+      const newHost = remaining[0].peerId;
+
+      roomHost.set(roomId, newHost);
+
+      for (const p of remaining) {
+        if (p.readyState === 1) {
+          try {
+            p.send(JSON.stringify({
+              type: 'host-change',
+              host: newHost
+            }));
+          } catch {}
+        }
+      }
+    } else {
+      roomHost.delete(roomId);
+    }
+  }
+
+  // Пустое лобби удаляем
+  if (room.size === 0) {
+    rooms.delete(roomId);
+    roomMeta.delete(roomId);
+  }
+
+  clients.delete(c.peerId);
+
+  broadcastLobbyList();
+
+  console.log(
+    `[S] - ${c.peerId.slice(0, 8)} (${reason})`
+  );
+}
+
+
+// ============================================================
+// WEBSOCKET
+// ============================================================
+
+wss.on('connection', (ws, req) => {
+
+  const ip = (
+    req.headers['x-forwarded-for'] ||
+    req.socket.remoteAddress ||
+    'unknown'
+  )
+    .split(',')[0]
+    .trim();
+
+  if (
+    ws._socket &&
+    ws._socket.setNoDelay
+  ) {
+    ws._socket.setNoDelay(true);
+  }
+
+  // Проверка IP-бана
+  const banUntil = ipBanList.get(ip);
+
+  if (
+    banUntil &&
+    banUntil > Date.now()
+  ) {
+    try {
+      ws.close(1008, 'ip banned');
+    } catch {}
+
+    return;
+  }
+
+  // ID игрока
+  ws.peerId =
+    'peer_' +
+    Math.random()
+      .toString(36)
+      .slice(2, 10);
+
+  ws.isAlive = true;
+
+  const c = ensureClient(ws, ip);
+
+  console.log(
+    `[S] + ${c.peerId.slice(0, 8)} from ${ip}`
+  );
+
+
+  // ==========================================================
+  // MESSAGE
+  // ==========================================================
 
   ws.on('message', raw => {
 
-    if (raw.length > AC.MAX_MSG){
-      ws.close();
+    const msg = safeParse(raw);
+
+    if (!msg) {
+      strike(
+        c,
+        'bad packet',
+        AC.STRIKE_SEVERE
+      );
       return;
     }
 
-    let msg;
-
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      send(ws, {
-        type: 'error',
-        msg: 'invalid json'
-      });
+    if (!checkRate(c)) {
       return;
     }
 
-    if (!msg || typeof msg.type !== 'string'){
-      return;
-    }
+    decay(c);
 
-    /*
-     * ============================================================
-     * СПИСОК ЛОББИ
-     * ============================================================
-     */
 
-    if (msg.type === 'list'){
+    // ========================================================
+    // СПИСОК ЛОББИ
+    // ========================================================
+
+    if (msg.type === 'list') {
       sendLobbyList(ws);
       return;
     }
 
-    /*
-     * ============================================================
-     * СОЗДАНИЕ ЛОББИ
-     * ============================================================
-     */
 
-    if (msg.type === 'create'){
+    // ========================================================
+    // СОЗДАНИЕ ЛОББИ
+    // ========================================================
 
-      if (c.room){
-        send(ws, {
-          type: 'error',
-          msg: 'already in room'
-        });
+    if (msg.type === 'create') {
+
+      if (rooms.size >= AC.MAX_ROOMS) {
+        try {
+          ws.send(JSON.stringify({
+            type: 'error',
+            msg: 'too many rooms'
+          }));
+        } catch {}
+
         return;
       }
 
-      if (rooms.size >= AC.MAX_ROOMS){
-        send(ws, {
-          type: 'error',
-          msg: 'server room limit'
-        });
-        return;
-      }
-
-      const name = cleanLobbyName(msg.name);
       const isPrivate = !!msg.private;
-      const password = String(msg.password || '').slice(0, 32);
 
-      if (!name){
-        send(ws, {
-          type: 'error',
-          msg: 'lobby name required'
-        });
-        return;
-      }
+      const password = isPrivate
+        ? String(msg.password || '').slice(0, 64)
+        : '';
 
-      if (isPrivate && !password){
-        send(ws, {
-          type: 'error',
-          msg: 'private lobby requires password'
-        });
+      if (isPrivate && !password) {
+        try {
+          ws.send(JSON.stringify({
+            type: 'error',
+            msg: 'password required'
+          }));
+        } catch {}
+
         return;
       }
 
       const roomId = makeRoomId();
 
-      rooms.set(roomId, new Set());
+      rooms.set(
+        roomId,
+        new Set()
+      );
 
       roomMeta.set(roomId, {
-        name,
+        name: cleanLobbyName(msg.name),
         private: isPrivate,
         password
       });
 
-      send(ws, {
-        type: 'created',
-        room: roomId,
-        name,
-        private: isPrivate
-      });
+      try {
+        ws.send(JSON.stringify({
+          type: 'created',
+          room: roomId,
+          name: roomMeta.get(roomId).name,
+          private: isPrivate
+        }));
+      } catch {}
 
       broadcastLobbyList();
+
+      console.log(
+        `[Lobby] created ${roomId} ` +
+        `"${roomMeta.get(roomId).name}" ` +
+        `private=${isPrivate}`
+      );
 
       return;
     }
 
-    /*
-     * ============================================================
-     * ВХОД В ЛОББИ
-     * ============================================================
-     */
 
-    if (msg.type === 'join'){
+    // ========================================================
+    // ВХОД В ЛОББИ
+    // ========================================================
 
-      if (c.room){
-        send(ws, {
-          type: 'error',
-          msg: 'already in room'
-        });
+    if (msg.type === 'join') {
+
+      if (c.room) {
+        strike(c, 'double join');
         return;
       }
 
-      const roomId = String(msg.room || '').slice(0, 32);
+      const roomId =
+        String(msg.room || '').slice(0, 32);
 
-      if (!roomId){
-        send(ws, {
-          type: 'error',
-          msg: 'no room'
-        });
+      if (!roomId) {
+        strike(c, 'no room');
         return;
       }
 
-      /*
-       * Совместимость со старыми комнатами:
-       * если комнаты нет, она создаётся как открытая.
-       */
-
-      if (!rooms.has(roomId)){
-        rooms.set(roomId, new Set());
+      // Для совместимости создаём отсутствующую комнату
+      if (!rooms.has(roomId)) {
+        rooms.set(
+          roomId,
+          new Set()
+        );
 
         roomMeta.set(roomId, {
           name: roomId,
@@ -304,91 +566,125 @@ wss.on('connection', (ws, req) => {
       }
 
       const meta =
-        roomMeta.get(roomId) ||
-        {
+        roomMeta.get(roomId) || {
           name: roomId,
           private: false,
           password: ''
         };
 
-      /*
-       * Проверяем пароль закрытого лобби.
-       */
 
+      // Проверяем пароль
       if (
         meta.private &&
-        String(msg.password || '') !==
-        String(meta.password || '')
-      ){
-        send(ws, {
-          type: 'error',
-          msg: 'wrong lobby password'
-        });
+        String(msg.password || '') !== meta.password
+      ) {
+
+        try {
+          ws.send(JSON.stringify({
+            type: 'error',
+            msg: 'wrong password'
+          }));
+        } catch {}
 
         return;
       }
+
 
       const room = rooms.get(roomId);
 
-      if (room.size >= AC.MAX_CLIENTS_PER_ROOM){
-        send(ws, {
-          type: 'error',
-          msg: 'room full'
-        });
+      // Комната заполнена
+      if (
+        room.size >=
+        AC.MAX_CLIENTS_PER_ROOM
+      ) {
+
+        try {
+          ws.send(JSON.stringify({
+            type: 'error',
+            msg: 'room full'
+          }));
+        } catch {}
+
+        try {
+          ws.close(
+            1008,
+            'room full'
+          );
+        } catch {}
 
         return;
       }
 
-      /*
-       * Список уже находящихся игроков.
-       */
 
-      const existingPeers = [...room];
-
-      /*
-       * Добавляем игрока.
-       */
-
-      room.add(c.peerId);
+      // Добавляем игрока
       c.room = roomId;
+      ws.roomId = roomId;
 
-      /*
-       * Если это первый игрок — он становится хостом.
-       */
+      room.add(ws);
 
-      if (!roomHost.has(roomId)){
-        roomHost.set(roomId, c.peerId);
+
+      // Назначаем хоста
+      if (!roomHost.has(roomId)) {
+        roomHost.set(
+          roomId,
+          c.peerId
+        );
       }
 
-      const host = roomHost.get(roomId);
 
-      send(ws, {
-        type: 'welcome',
-        peerId: c.peerId,
-        peers: existingPeers,
-        host,
-        lobby: {
-          id: roomId,
-          name: meta.name || roomId,
-          private: !!meta.private
+      const existingPeers =
+        [...room]
+          .map(p => p.peerId)
+          .filter(
+            id =>
+              id &&
+              id !== c.peerId
+          );
+
+
+      // Ответ подключившемуся
+      try {
+        ws.send(JSON.stringify({
+          type: 'welcome',
+
+          peerId: c.peerId,
+
+          peers: existingPeers,
+
+          host:
+            roomHost.get(roomId),
+
+          lobbyName:
+            meta.name,
+
+          private:
+            !!meta.private
+        }));
+      } catch {}
+
+
+      // Уведомляем остальных
+      for (const peer of room) {
+
+        if (
+          peer !== ws &&
+          peer.readyState === 1
+        ) {
+
+          try {
+            peer.send(JSON.stringify({
+              type: 'peer-join',
+              peerId: c.peerId
+            }));
+          } catch {}
         }
-      });
+      }
 
-      /*
-       * Сообщаем остальным игрокам о новом игроке.
-       */
-
-      broadcastRoom(
-        roomId,
-        {
-          type: 'peer_join',
-          peerId: c.peerId
-        },
-        ws
-      );
 
       console.log(
-        `[Room ${roomId}] + ${c.peerId.slice(0, 8)} total=${room.size}`
+        `[Room ${roomId}] + ` +
+        `${c.peerId.slice(0, 8)} ` +
+        `total=${room.size}`
       );
 
       broadcastLobbyList();
@@ -396,99 +692,449 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    /*
-     * ============================================================
-     * ИГРОВЫЕ СООБЩЕНИЯ
-     * ============================================================
-     */
 
-    if (!c.room){
-      send(ws, {
-        type: 'error',
-        msg: 'not in room'
-      });
+    // ========================================================
+    // ДАЛЬШЕ НУЖНО БЫТЬ В ЛОББИ
+    // ========================================================
 
-      return;
-    }
-
-    /*
-     * Остальная игровая логика:
-     * сообщения просто передаются другим игрокам комнаты.
-     *
-     * Здесь сохраняется простая relay-модель,
-     * которая использовалась существующей игрой.
-     */
-
-    if (
-      msg.type === 'input' ||
-      msg.type === 'state' ||
-      msg.type === 'event' ||
-      msg.type === 'snapshot' ||
-      msg.type === 'ping' ||
-      msg.type === 'chat'
-    ){
-
-      broadcastRoom(
-        c.room,
-        {
-          ...msg,
-          peerId: c.peerId
-        },
-        ws
+    if (!c.room) {
+      strike(
+        c,
+        'msg before join',
+        AC.STRIKE_SEVERE
       );
 
       return;
     }
 
-  });
 
-  ws.on('close', () => {
-    removeClient(c);
-  });
+    // ========================================================
+    // PLAYER ID / BAN HASH
+    // ========================================================
 
-  ws.on('error', () => {
-    removeClient(c);
-  });
-});
+    if (
+      msg.a === 'id' &&
+      msg.d &&
+      msg.d.pubHash
+    ) {
 
+      const hash =
+        String(msg.d.pubHash)
+          .slice(0, 64);
 
-/*
- * ============================================================
- * PING / PONG
- * ============================================================
- */
+      if (bannedHashes.has(hash)) {
+        banClient(
+          c,
+          'persistent ban'
+        );
 
-const heartbeat = setInterval(() => {
+        return;
+      }
 
-  for (const c of clients.values()){
-
-    if (!c.alive){
-      try {
-        c.ws.terminate();
-      } catch {}
-
-      continue;
+      c.pubHash = hash;
     }
 
-    c.alive = false;
 
-    try {
-      c.ws.ping();
-    } catch {}
-  }
+    // ========================================================
+    // INPUT
+    // ========================================================
 
-}, 30000);
+    if (
+      msg.a === 'in' &&
+      msg.d
+    ) {
+
+      const d = msg.d;
+
+      if (!validateInputPayload(d)) {
+        strike(
+          c,
+          'bad input',
+          AC.STRIKE_SEVERE
+        );
+
+        return;
+      }
+
+      if (d.seq <= c.seq) {
+        strike(
+          c,
+          'replay',
+          AC.STRIKE_SEVERE
+        );
+
+        return;
+      }
+
+      if (
+        c.seq >= 0 &&
+        d.seq - c.seq > AC.MAX_SEQ_GAP
+      ) {
+
+        strike(
+          c,
+          'seq gap'
+        );
+
+        return;
+      }
+
+      c.seq = d.seq;
+    }
 
 
-/*
- * ============================================================
- * ЗАВЕРШЕНИЕ СЕРВЕРА
- * ============================================================
- */
+    // ========================================================
+    // HOST ONLY ACTIONS
+    // ========================================================
 
-wss.on('close', () => {
-  clearInterval(heartbeat);
+    if (
+      msg.a === 'st' ||
+      msg.a === 'bl' ||
+      msg.a === 'hit' ||
+      msg.a === 'pk'
+    ) {
+
+      const hostId =
+        roomHost.get(c.room);
+
+      if (
+        hostId !== c.peerId
+      ) {
+
+        strike(
+          c,
+          `${msg.a} from non-host`,
+          AC.STRIKE_SEVERE
+        );
+
+        return;
+      }
+    }
+
+
+    // ========================================================
+    // BAN
+    // ========================================================
+
+    if (msg.a === 'ban') {
+
+      const hostId =
+        roomHost.get(c.room);
+
+      if (
+        hostId !== c.peerId
+      ) {
+
+        strike(
+          c,
+          'ban from non-host',
+          AC.STRIKE_SEVERE
+        );
+
+        return;
+      }
+
+      const target =
+        msg.d &&
+        msg.d.id;
+
+      if (
+        target &&
+        target !== c.peerId
+      ) {
+
+        const tc =
+          clients.get(target);
+
+        if (tc) {
+
+          if (msg.d.pubHash) {
+            bannedHashes.add(
+              msg.d.pubHash
+            );
+
+            saveBans();
+          }
+
+          try {
+            tc.ws.send(
+              JSON.stringify({
+                type: 'banned',
+                reason:
+                  msg.d.reason ||
+                  'banned'
+              })
+            );
+          } catch {}
+
+          try {
+            tc.ws.close(
+              1008,
+              'banned'
+            );
+          } catch {}
+        }
+      }
+    }
+
+
+    // ========================================================
+    // RELAY GAME DATA
+    // ========================================================
+
+    const room =
+      rooms.get(c.room);
+
+    if (!room) {
+      return;
+    }
+
+
+    // Сообщение конкретному игроку
+    if (msg.to) {
+
+      const target =
+        [...room].find(
+          p => p.peerId === msg.to
+        );
+
+      if (
+        target &&
+        target.readyState === 1
+      ) {
+
+        try {
+          target.send(
+            JSON.stringify({
+              ...msg.data,
+              from: c.peerId
+            })
+          );
+        } catch {}
+      }
+
+    }
+
+    // Broadcast всем остальным
+    else if (msg.data) {
+
+      for (const peer of room) {
+
+        if (peer === ws) {
+          continue;
+        }
+
+        if (
+          peer.readyState !== 1
+        ) {
+          continue;
+        }
+
+
+        // Не отправляем broadcast
+        // обратно владельцу события
+        if (
+          msg.data.a === 'bl' &&
+          msg.data.d &&
+          msg.data.d.owner === peer.peerId
+        ) {
+          continue;
+        }
+
+
+        try {
+          peer.send(
+            JSON.stringify({
+              ...msg.data,
+              from: c.peerId
+            })
+          );
+        } catch {}
+      }
+    }
+  });
+
+
+  // ==========================================================
+  // CLOSE
+  // ==========================================================
+
+  ws.on(
+    'close',
+    () => cleanupClient(ws, 'close')
+  );
+
+
+  // ==========================================================
+  // ERROR
+  // ==========================================================
+
+  ws.on(
+    'error',
+    err =>
+      console.error(
+        `[S] err:`,
+        err.message
+      )
+  );
+
+
+  // ==========================================================
+  // PONG
+  // ==========================================================
+
+  ws.on(
+    'pong',
+    () => {
+      ws.isAlive = true;
+    }
+  );
 });
 
 
-console.log(`WebSocket server started on port ${PORT}`);
+// ============================================================
+// PING
+// ============================================================
+
+setInterval(() => {
+
+  wss.clients.forEach(ws => {
+
+    if (ws.isAlive === false) {
+      try {
+        ws.terminate();
+      } catch {}
+
+      return;
+    }
+
+    ws.isAlive = false;
+
+    try {
+      ws.ping();
+    } catch {}
+  });
+
+}, 10000);
+
+
+// ============================================================
+// CLEANUP DEAD CLIENTS
+// ============================================================
+
+setInterval(() => {
+
+  const activeIds =
+    new Set(
+      [...wss.clients]
+        .map(ws => ws.peerId)
+    );
+
+  for (
+    const [peerId, c]
+    of clients
+  ) {
+
+    if (
+      !activeIds.has(peerId)
+    ) {
+
+      const roomId = c.room;
+
+      if (roomId) {
+
+        const room =
+          rooms.get(roomId);
+
+        if (room) {
+
+          // Сообщаем игрокам
+          for (const peer of room) {
+
+            if (
+              peer.readyState === 1
+            ) {
+
+              try {
+                peer.send(
+                  JSON.stringify({
+                    type: 'peer-leave',
+                    peerId
+                  })
+                );
+              } catch {}
+            }
+          }
+
+          room.delete(c.ws);
+
+
+          // Новый хост
+          if (
+            roomHost.get(roomId) ===
+            peerId
+          ) {
+
+            const remaining =
+              [...room];
+
+            if (remaining.length) {
+
+              const newHost =
+                remaining[0].peerId;
+
+              roomHost.set(
+                roomId,
+                newHost
+              );
+
+              for (
+                const p of remaining
+              ) {
+
+                if (
+                  p.readyState === 1
+                ) {
+
+                  try {
+                    p.send(
+                      JSON.stringify({
+                        type: 'host-change',
+                        host: newHost
+                      })
+                    );
+                  } catch {}
+                }
+              }
+
+            } else {
+              roomHost.delete(roomId);
+            }
+          }
+
+
+          // Удаляем пустую комнату
+          if (room.size === 0) {
+            rooms.delete(roomId);
+            roomMeta.delete(roomId);
+          }
+        }
+      }
+
+      clients.delete(peerId);
+
+      broadcastLobbyList();
+    }
+  }
+
+}, 15000);
+
+
+// ============================================================
+// START
+// ============================================================
+
+console.log(
+  `[S] WebSocket relay + MaxAC + Lobbies ` +
+  `listening on port ${port}`
+);
