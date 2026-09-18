@@ -268,6 +268,8 @@ const CFG = {
   DASH_CD: 1400,
 
   GRENADE_SPEED: 750,
+  GRENADE_GRAVITY: 900,
+  GRENADE_BOUNCE: 0.38,
   GRENADE_R: 10,
   GRENADE_FUSE: 1500,
   GRENADE_CD: 1800,
@@ -2089,9 +2091,16 @@ class GameScene extends Phaser.Scene {
     else if (d.homing) color = 0xff66ff
     else if (d.ricochet) color = 0x22ffff
 
-    const s = this.add.image(d.x, d.y, 'bullet')
-      .setDisplaySize(size, size)
-      .setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(5)
+    let s
+    if (d.grenade){
+      s = this.add.circle(d.x, d.y, CFG.GRENADE_R, color, 1)
+        .setStrokeStyle(3, 0xffffff, 0.75)
+        .setDepth(5)
+    } else {
+      s = this.add.image(d.x, d.y, 'bullet')
+        .setDisplaySize(size, size)
+        .setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(5)
+    }
 
     this.ghostBullets[d.id] = {
       sprite: s, vx: d.vx, vy: d.vy, born: this.time.now,
@@ -2578,24 +2587,42 @@ class GameScene extends Phaser.Scene {
       const b = this.bullets[i]
 
       if (b.isGrenade){
+        /* Баллистический полёт: граната не летит как пуля. */
         const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
         b.vx *= drag
         b.vy *= drag
+        b.vy += CFG.GRENADE_GRAVITY * dt
 
         let nx = b.x + b.vx * dt
         let ny = b.y + b.vy * dt
 
-        let hitWall = false
         for (const r of this.wallRects){
           if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
               ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
-            hitWall = true
             const rres = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
             if (rres){ nx = rres.x; ny = rres.y }
+
+            const cx = r.x + r.w/2, cy = r.y + r.h/2
+            const dx = nx - cx, dy = ny - cy
+            if (Math.abs(dx)/(r.w/2 + CFG.GRENADE_R) > Math.abs(dy)/(r.h/2 + CFG.GRENADE_R)){
+              b.vx *= -CFG.GRENADE_BOUNCE
+            } else {
+              b.vy *= -CFG.GRENADE_BOUNCE
+              b.vx *= 0.72
+            }
             break
           }
         }
-        if (hitWall){ b.vx = 0; b.vy = 0 }
+
+        if (nx <= CFG.GRENADE_R || nx >= CFG.W-CFG.GRENADE_R){
+          nx = clamp(nx, CFG.GRENADE_R, CFG.W-CFG.GRENADE_R)
+          b.vx *= -CFG.GRENADE_BOUNCE
+        }
+        if (ny <= CFG.GRENADE_R || ny >= CFG.H-CFG.GRENADE_R){
+          ny = clamp(ny, CFG.GRENADE_R, CFG.H-CFG.GRENADE_R)
+          b.vy *= -CFG.GRENADE_BOUNCE
+          b.vx *= 0.72
+        }
 
         b.x = nx
         b.y = ny
@@ -2917,21 +2944,38 @@ class GameScene extends Phaser.Scene {
         const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
         g.vx *= drag
         g.vy *= drag
+        g.vy += CFG.GRENADE_GRAVITY * dt
 
         let nx = g.sprite.x + g.vx * dt
         let ny = g.sprite.y + g.vy * dt
 
-        let hitWall = false
         for (const r of this.wallRects){
           if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
               ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
-            hitWall = true
             const rres = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
             if (rres){ nx = rres.x; ny = rres.y }
+
+            const cx = r.x + r.w/2, cy = r.y + r.h/2
+            const dx = nx - cx, dy = ny - cy
+            if (Math.abs(dx)/(r.w/2 + CFG.GRENADE_R) > Math.abs(dy)/(r.h/2 + CFG.GRENADE_R)){
+              g.vx *= -CFG.GRENADE_BOUNCE
+            } else {
+              g.vy *= -CFG.GRENADE_BOUNCE
+              g.vx *= 0.72
+            }
             break
           }
         }
-        if (hitWall){ g.vx = 0; g.vy = 0 }
+
+        if (nx <= CFG.GRENADE_R || nx >= CFG.W-CFG.GRENADE_R){
+          nx = clamp(nx, CFG.GRENADE_R, CFG.W-CFG.GRENADE_R)
+          g.vx *= -CFG.GRENADE_BOUNCE
+        }
+        if (ny <= CFG.GRENADE_R || ny >= CFG.H-CFG.GRENADE_R){
+          ny = clamp(ny, CFG.GRENADE_R, CFG.H-CFG.GRENADE_R)
+          g.vy *= -CFG.GRENADE_BOUNCE
+          g.vx *= 0.72
+        }
 
         g.sprite.x = nx
         g.sprite.y = ny
