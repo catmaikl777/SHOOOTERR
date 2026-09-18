@@ -352,6 +352,8 @@ const CFG = {
   GRENADE_DAMAGE: 60,
   GRENADE_SELF_DAMAGE_MUL: 0.5,
   GRENADE_DRAG_K: 1.2,
+  GRENADE_GRAVITY: 900,
+  GRENADE_BOUNCE: 0.38,
   GRENADE_MIN_FORCE: 0.3,
 
   SFX_MAX_DIST:      1400,
@@ -1503,7 +1505,8 @@ class GameScene extends Phaser.Scene {
         ny = clamp(ny, CFG.GRENADE_R, CFG.H-CFG.GRENADE_R); vy *= -CFG.GRENADE_BOUNCE; vx *= 0.72
       }
       x = nx; y = ny; lastX = x; lastY = y
-      if (Math.floor(t / step) % 2 === 0){ gr.fillStyle(0xffffff, 0.55); gr.fillCircle(x, y, 3) }
+      if (Math.floor(t / step) % 2 === 0){ gr.fillStyle(0xffffff, 0.85); gr.fillCircle(x, y, 4) }
+      gr.lineStyle(1, 0xffffff, 0.28); gr.lineBetween(lastX, lastY, x, y)
     }
 
     gr.lineStyle(3, 0xffd84d, 0.95)
@@ -2709,22 +2712,26 @@ class GameScene extends Phaser.Scene {
         const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
         b.vx *= drag
         b.vy *= drag
+        b.vy += CFG.GRENADE_GRAVITY * dt
 
         let nx = b.x + b.vx * dt
         let ny = b.y + b.vy * dt
 
-        let hitWall = false
         for (const r of this.wallRects){
           if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
               ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
-            hitWall = true
+            const oldX = nx, oldY = ny
             const rres = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
             if (rres){ nx = rres.x; ny = rres.y }
+            const cx = r.x + r.w/2, cy = r.y + r.h/2
+            const dx = oldX - cx, dy = oldY - cy
+            if (Math.abs(dx)/(r.w/2 + CFG.GRENADE_R) > Math.abs(dy)/(r.h/2 + CFG.GRENADE_R)) b.vx *= -CFG.GRENADE_BOUNCE
+            else { b.vy *= -CFG.GRENADE_BOUNCE; b.vx *= 0.72 }
             break
           }
         }
-        if (hitWall){ b.vx = 0; b.vy = 0 }
-
+        if (nx <= CFG.GRENADE_R || nx >= CFG.W-CFG.GRENADE_R){ nx=clamp(nx,CFG.GRENADE_R,CFG.W-CFG.GRENADE_R); b.vx*=-CFG.GRENADE_BOUNCE }
+        if (ny <= CFG.GRENADE_R || ny >= CFG.H-CFG.GRENADE_R){ ny=clamp(ny,CFG.GRENADE_R,CFG.H-CFG.GRENADE_R); b.vy*=-CFG.GRENADE_BOUNCE; b.vx*=0.72 }
         b.x = nx
         b.y = ny
 
@@ -3044,6 +3051,7 @@ class GameScene extends Phaser.Scene {
         const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
         g.vx *= drag
         g.vy *= drag
+        g.vy += CFG.GRENADE_GRAVITY * dt
 
         let nx = g.sprite.x + g.vx * dt
         let ny = g.sprite.y + g.vy * dt
@@ -3053,12 +3061,18 @@ class GameScene extends Phaser.Scene {
           if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
               ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
             hitWall = true
+            const oldX = nx, oldY = ny
             const rres = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
             if (rres){ nx = rres.x; ny = rres.y }
+            const cx = r.x + r.w/2, cy = r.y + r.h/2
+            const dx = oldX - cx, dy = oldY - cy
+            if (Math.abs(dx)/(r.w/2 + CFG.GRENADE_R) > Math.abs(dy)/(r.h/2 + CFG.GRENADE_R)) g.vx*=-CFG.GRENADE_BOUNCE
+            else { g.vy*=-CFG.GRENADE_BOUNCE; g.vx*=0.72 }
             break
           }
         }
-        if (hitWall){ g.vx = 0; g.vy = 0 }
+        if (nx <= CFG.GRENADE_R || nx >= CFG.W-CFG.GRENADE_R){ nx=clamp(nx,CFG.GRENADE_R,CFG.W-CFG.GRENADE_R); g.vx*=-CFG.GRENADE_BOUNCE }
+        if (ny <= CFG.GRENADE_R || ny >= CFG.H-CFG.GRENADE_R){ ny=clamp(ny,CFG.GRENADE_R,CFG.H-CFG.GRENADE_R); g.vy*=-CFG.GRENADE_BOUNCE; g.vx*=0.72 }
 
         g.sprite.x = nx
         g.sprite.y = ny
