@@ -8,15 +8,23 @@
 <title>Shoot'n'cats</title>
 <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
 <style>
+  :root{
+    --joy-size: clamp(120px, 32vmin, 280px);
+  }
+
   html,body{margin:0;padding:0;height:100%;background:#05070d;overflow:hidden;
             touch-action:none;-webkit-user-select:none;user-select:none;
             -webkit-tap-highlight-color:transparent;}
   #game{width:100vw;height:100vh;}
   #ui{position:fixed;inset:0;pointer-events:none;z-index:5;}
-  #joyL,#joyR{position:absolute;bottom:5vh;width:32vmin;height:32vmin;
-              max-width:280px;max-height:280px;min-width:120px;min-height:120px;
+
+  /* ====== JOYSTICKS ====== */
+  #joyL,#joyR{position:absolute;bottom:5vh;
+              width:var(--joy-size);height:var(--joy-size);
               pointer-events:auto;}
   #joyL{left:4vw;} #joyR{right:4vw;}
+
+  /* ====== STATUS / BONUSES / SCORES / AC ====== */
   #status{position:fixed;top:8px;left:50%;transform:translateX(-50%);
           color:#8b949e;font:clamp(11px,1.8vmin,16px) monospace;z-index:6;
           text-align:center;pointer-events:none;white-space:pre;padding:4px 10px;
@@ -36,6 +44,8 @@
   #ac{position:fixed;top:96px;right:8px;color:#ff2266;
       font:clamp(9px,1.5vmin,13px) monospace;
       z-index:6;text-align:right;pointer-events:none;white-space:pre;opacity:.85;line-height:1.4;}
+
+  /* ====== TOP BUTTONS ====== */
   #voteBtn{position:fixed;top:8px;right:60px;
            padding:clamp(8px,1.5vmin,14px) clamp(12px,2.2vmin,22px);
            font:clamp(11px,1.8vmin,15px) monospace;
@@ -53,20 +63,57 @@
             font:clamp(10px,1.6vmin,14px) monospace;
             z-index:7;text-align:right;pointer-events:none;white-space:pre;line-height:1.4;}
 
-  /* ====== DASH ====== */
-  #dashBtn{position:fixed;right:4vw;bottom:calc(5vh + 34vmin);
-           width:clamp(72px,11vmin,104px);height:clamp(72px,11vmin,104px);
-           border-radius:50%;border:2px solid #ff2266aa;background:#ff226622;
-           color:#ff2266;font:bold clamp(20px,3.6vmin,30px) monospace;
-           z-index:7;pointer-events:auto;cursor:pointer;
-           text-shadow:0 0 8px #ff2266;transition:transform .08s,background .15s,opacity .15s;
-           box-shadow:0 0 18px #ff226644, inset 0 0 12px #ff226633;
-           display:flex;align-items:center;justify-content:center;
-           padding:0;line-height:1;}
+  /* ====== ACTION BUTTONS (стек: weapon + dash) ====== */
+  #actionBtns{
+    position:fixed;
+    right:4vw;
+    bottom: calc(5vh + var(--joy-size) + 12px);
+    display:flex;
+    flex-direction:column;   /* weapon сверху, dash снизу */
+    gap:12px;
+    align-items:flex-end;
+    z-index:7;
+    pointer-events:none;
+  }
+  #actionBtns > button{ pointer-events:auto; }
+
+  /* DASH */
+  #dashBtn{
+    width:clamp(72px,11vmin,104px);
+    height:clamp(72px,11vmin,104px);
+    border-radius:50%;
+    border:2px solid #ff2266aa;
+    background:#ff226622;
+    color:#ff2266;
+    font:bold clamp(20px,3.6vmin,30px) monospace;
+    cursor:pointer;
+    text-shadow:0 0 8px #ff2266;
+    transition:transform .08s,background .15s,opacity .15s;
+    box-shadow:0 0 18px #ff226644, inset 0 0 12px #ff226633;
+    display:flex;align-items:center;justify-content:center;
+    padding:0;line-height:1;
+  }
   #dashBtn:active{background:#ff226666;transform:scale(.92);}
   #dashBtn.cooling{opacity:.35;color:#8b949e;border-color:#30363d;
                    background:#30363d55;text-shadow:none;box-shadow:none;
                    font-size:clamp(14px,2.2vmin,20px);}
+
+  /* WEAPON */
+  #weaponBtn{
+    width:clamp(64px,9.5vmin,92px);
+    height:clamp(64px,9.5vmin,92px);
+    border-radius:50%;
+    border:2px solid #ffaa33aa;
+    background:#ffaa3322;
+    color:#ffaa33;
+    font:bold clamp(24px,4.4vmin,36px) monospace;
+    cursor:pointer;
+    transition:transform .08s,background .15s,color .15s,border-color .15s;
+    display:flex;align-items:center;justify-content:center;
+    padding:0;line-height:1;
+  }
+  #weaponBtn:active{transform:scale(.92);}
+  #weaponBtn.grenade{border-color:#22ccffaa;background:#22ccff22;color:#22ccff;}
 
   /* ====== KILLFEED ====== */
   #killfeed{position:fixed;top:200px;left:12px;
@@ -94,6 +141,39 @@
               rgba(0,0,0,0) 42%, rgba(255,34,102,.42) 100%);
             opacity:0;transition:opacity .35s;}
 
+  /* ====== MEDIA: короткие экраны ====== */
+  @media (max-height: 620px){
+    :root{ --joy-size: clamp(100px, 28vmin, 200px); }
+
+    #dashBtn{
+      width:64px; height:64px;
+      font-size:clamp(18px,3vmin,24px);
+    }
+    #weaponBtn{
+      width:58px; height:58px;
+      font-size:clamp(22px,3.6vmin,30px);
+    }
+    #actionBtns{ gap:8px; }
+
+    #scores{
+      max-height:96px;
+      font-size:clamp(10px,1.5vmin,13px);
+      padding:6px 10px;
+    }
+    #ac{
+      top:auto;
+      bottom:8px;
+      font-size:clamp(8px,1.3vmin,11px);
+    }
+    #killfeed{ top:170px; }
+  }
+
+  @media (max-height: 450px){
+    #ac{ display:none; }
+    #killfeed{ top:150px; max-width:38vw; }
+  }
+
+  /* ====== MENU ====== */
   #menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
         justify-content:center;background:#05070d;color:#e6edf3;
         font-family:monospace;gap:16px;z-index:20;padding:24px;text-align:center;}
@@ -123,7 +203,10 @@
 <div id="vignette"></div>
 <button id="voteBtn" style="display:none">VOTE HOST</button>
 <button id="soundBtn" style="display:none">🔊</button>
-<button id="dashBtn" style="display:none">⚡</button>
+<div id="actionBtns" style="display:none">
+  <button id="weaponBtn">🔫</button>
+  <button id="dashBtn">⚡</button>
+</div>
 
 <div id="menu">
   <h1>Shoot'n'cats</h1>
@@ -134,6 +217,7 @@
     Левый стик — движение<br>
     Правый стик — прицел и огонь<br>
     ⚡ — рывок (кулдаун 1.4с)<br>
+    💣/🔫 — смена оружия (ружьё / гранаты)<br>
     Бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💦 распылитель
   </div>
   <div id="pid">…generating identity…</div>
@@ -163,7 +247,7 @@ const CFG = {
   WALL_GLOW:  true,
   FLOOR_GLOW: true,
 
-  PICKUP_INTERVAL:   5000,
+  PICKUP_INTERVAL:   3500,
   PICKUP_MAX:        6,
   PICKUP_RADIUS:     24,
   BONUS_DURATION:    20000,
@@ -174,16 +258,23 @@ const CFG = {
   BONUS_RICOCHET_MAX: 2,
   BONUS_HOMING_FIRE_CD: 2000,
 
-  /* 🆕 РАСПЫЛИТЕЛЬ вместо ваншота */
   BONUS_SPRAYER_FIRE_CD:  700,
   BONUS_SPRAYER_PELLETS:  7,
   BONUS_SPRAYER_SPREAD_DEG: 30,
-  BONUS_SPRAYER_DAMAGE_MUL: 0.5,   // 25 * 0.5 = 12.5 урона на пулю
+  BONUS_SPRAYER_DAMAGE_MUL: 0.5,
 
-  /* РЫВОК */
   DASH_SPEED: 720,
   DASH_DURATION: 160,
   DASH_CD: 1400,
+
+  GRENADE_SPEED: 750,
+  GRENADE_R: 10,
+  GRENADE_FUSE: 1500,
+  GRENADE_CD: 1800,
+  GRENADE_RADIUS: 140,
+  GRENADE_DAMAGE: 60,
+  GRENADE_SELF_DAMAGE_MUL: 0.5,
+  GRENADE_DRAG_K: 1.2,
 
   SFX_MAX_DIST:      1400,
   SFX_MASTER:        0.55,
@@ -416,7 +507,6 @@ class SoundEngine {
     if (!this._throttle('shoot', 15)) return
     const V = 0.22 * volMul
     if (kind === 'sprayer'){
-      // 🆕 Дробовик: плотный шумовой удар + низкий thump
       this._noise({dur:0.16, vol:V*1.3, type:'lowpass', freq:2200, freqEnd:250, pan, send:0.35})
       this._tone({freq: 150, freqEnd: 45, type:'sawtooth', dur:0.2, vol:V*1.0, pan, send:0.3})
       this._tone({freq: 700, freqEnd: 250, type:'square', dur:0.1, vol:V*0.4, pan, send:0.2})
@@ -432,6 +522,26 @@ class SoundEngine {
       this._noise({dur:0.09, vol:V, type:'lowpass', freq:3200, freqEnd:700, pan, send:0.12})
       this._tone({freq: 200, freqEnd: 60, type:'sawtooth', dur:0.12, vol:V*0.5, pan, send:0.08})
     }
+  }
+  grenadeThrow(pan = 0, volMul = 1){
+    if (!this._throttle('gthrow', 40)) return
+    const V = 0.22 * volMul
+    this._tone({freq: 380, freqEnd: 850, type:'sine', dur:0.16, vol:V, pan, send:0.2})
+    this._noise({dur:0.1, vol:V*0.55, type:'highpass', freq:2000, pan, send:0.15})
+  }
+  explosion(pan = 0, volMul = 1){
+    if (!this._throttle('expl', 40)) return
+    const V = 0.42 * volMul
+    this._noise({dur:0.55, vol:V, type:'lowpass', freq:1800, freqEnd:60, pan, send:0.6})
+    this._tone({freq: 130, freqEnd: 32, type:'sawtooth', dur:0.5, vol:V*0.85, pan, send:0.5})
+    this._tone({freq: 62, freqEnd: 25, type:'sine', dur:0.7, vol:V*0.7, pan, send:0.5})
+    this._noise({dur:0.32, vol:V*0.5, type:'bandpass', freq:400, pan, send:0.4})
+  }
+  weaponSwap(pan = 0, volMul = 1){
+    if (!this._throttle('wswap', 60)) return
+    const V = 0.2 * volMul
+    this._tone({freq: 700, freqEnd: 1200, type:'square', dur:0.07, vol:V, pan, send:0.15})
+    this._tone({freq: 1100, freqEnd: 500, type:'triangle', dur:0.1, vol:V*0.75, pan, send:0.15})
   }
   dash(pan = 0, volMul = 1){
     if (!this._throttle('dash', 60)) return
@@ -485,7 +595,6 @@ class SoundEngine {
       this._tone({freq: 1000, freqEnd: 1800, type:'sine', dur:0.35, vol:V, pan, send:0.5})
       this._tone({freq: 1500, freqEnd: 2400, type:'triangle', dur:0.3, vol:V*0.7, pan, send:0.5})
     } else if (type === 'sprayer'){
-      // 🆕 Звук подбора распылителя — «щёлк» барабана
       this._tone({freq: 250, freqEnd: 900, type:'sawtooth', dur:0.3, vol:V*1.0, pan, send:0.3})
       this._noise({dur:0.2, vol:V*0.6, type:'bandpass', freq:900, pan, send:0.3})
       this._tone({freq: 500, freqEnd: 1200, type:'triangle', dur:0.25, vol:V*0.5, pan, send:0.3})
@@ -749,6 +858,7 @@ class AntiCheat {
     if (!this.pair(data.m) || !this.pair(data.a)) return this.strike(id, 'bad vectors', AC_CFG.STRIKE_SEVERE)
     if (typeof data.f !== 'number' || (data.f !== 0 && data.f !== 1)) return this.strike(id, 'bad fire', AC_CFG.STRIKE_SEVERE)
     if (typeof data.seq !== 'number' || !Number.isFinite(data.seq)) return this.strike(id, 'no seq', AC_CFG.STRIKE_SEVERE)
+    if (data.w !== undefined && data.w !== 0 && data.w !== 1) return this.strike(id, 'bad weapon', AC_CFG.STRIKE_SEVERE)
     p.inputTimes.push(now)
     while (p.inputTimes.length && now - p.inputTimes[0] > 1000) p.inputTimes.shift()
     if (p.inputTimes.length > AC_CFG.MAX_INPUT_HZ) return this.strike(id, `flood`, AC_CFG.STRIKE_SEVERE)
@@ -982,9 +1092,10 @@ class GameScene extends Phaser.Scene {
 
     this.localBonuses = [0, 0, 0, 0, 0]
 
-    /* DASH */
     this.dash = { until:0, cdUntil:0, dirX:1, dirY:0 }
     this.dashSeq = 0
+
+    this.weapon = 'rifle'
 
     this.hostBlacklist = new Set()
     this.votes = new Map()
@@ -1020,9 +1131,13 @@ class GameScene extends Phaser.Scene {
 
     this.killfeedEl = document.getElementById('killfeed')
     this.vignetteEl = document.getElementById('vignette')
+
+    this.actionBtns = document.getElementById('actionBtns')
     this.dashBtn = document.getElementById('dashBtn')
-    this.dashBtn.style.display = ''
+    this.weaponBtn = document.getElementById('weaponBtn')
+    this.actionBtns.style.display = ''
     this._bindDashButton()
+    this._bindWeaponButton()
 
     this.setupJoysticks()
 
@@ -1031,6 +1146,23 @@ class GameScene extends Phaser.Scene {
     this.createView(this.myPeerId)
 
     this.setupNetwork()
+
+    /* гарантированный первый 💦 через 1.5 сек (только хост) */
+    this.time.delayedCall(1500, ()=>{
+      if (!this.isHost) return
+      const angle = Math.random() * Math.PI * 2
+      let x, y, tries = 0
+      do {
+        x = CFG.W/2 + Math.cos(angle) * (200 + Math.random()*300)
+        y = CFG.H/2 + Math.sin(angle) * (200 + Math.random()*300)
+        tries++
+      } while (this.isInsideWall(x, y, 40) && tries < 40)
+      if (tries < 40){
+        this.pickups.push({ id:'pk_'+(++this.pickupSeq), type:'sprayer', x, y })
+        const sp = this._spatial(x, y, 0.6)
+        this.sfx.pickupSpawn(sp.pan, sp.vol)
+      }
+    })
   }
 
   /* =========== DASH =========== */
@@ -1088,6 +1220,36 @@ class GameScene extends Phaser.Scene {
       this.dashBtn.textContent = Math.ceil((this.dash.cdUntil - now)/1000) + 's'
     } else {
       this.dashBtn.textContent = '⚡'
+    }
+  }
+
+  /* =========== WEAPON SWAP =========== */
+  _bindWeaponButton(){
+    const swap = (e) => {
+      if (e){ e.preventDefault(); e.stopPropagation() }
+      this.toggleWeapon()
+    }
+    this.weaponBtn.addEventListener('pointerdown', swap)
+    this.weaponBtn.addEventListener('contextmenu', e => e.preventDefault())
+    this.updateWeaponButton()
+  }
+
+  toggleWeapon(){
+    if (this.local.dead) return
+    this.weapon = this.weapon === 'rifle' ? 'grenade' : 'rifle'
+    this._lastLocalShot = 0
+    this.sfx.weaponSwap(0, 1)
+    this.updateWeaponButton()
+  }
+
+  updateWeaponButton(){
+    if (!this.weaponBtn) return
+    if (this.weapon === 'rifle'){
+      this.weaponBtn.textContent = '🔫'
+      this.weaponBtn.classList.remove('grenade')
+    } else {
+      this.weaponBtn.textContent = '💣'
+      this.weaponBtn.classList.add('grenade')
     }
   }
 
@@ -1205,7 +1367,6 @@ class GameScene extends Phaser.Scene {
     return { pan, vol }
   }
 
-  /* 🆕 _computeFireBehavior — sprayer вместо oneshot */
   _computeFireBehavior(bonuses, now){
     const rapid = bonuses[0] > now
     const homing = bonuses[1] > now
@@ -1246,6 +1407,7 @@ class GameScene extends Phaser.Scene {
       st:   (d, id) => this.onNetState(d, id),
       bl:   (d, id) => this.onNetBullet(d, id),
       hit:  (d, id) => this.onNetHit(d, id),
+      gex:  (d, id) => this.onNetExplosion(d, id),
       tok:  (d, id) => this.onNetToken(d, id),
       ban:  (d, id) => this.onNetBan(d, id),
       png:  (d, id) => this.onNetPing(d, id),
@@ -1386,6 +1548,7 @@ class GameScene extends Phaser.Scene {
   sendState  (d, id) { this.sendTo('st', d, id) }
   sendBullet (d)     { this.broadcast('bl', d) }
   sendHit    (d)     { this.broadcast('hit', d) }
+  sendExplosion(d)   { this.broadcast('gex', d) }
   sendTok    (d, id) { this.sendTo('tok', d, id) }
   sendBan    (d, id) { this.sendTo('ban', d, id) }
   sendPing   (d, id) { this.sendTo('png', d, id) }
@@ -1412,31 +1575,44 @@ class GameScene extends Phaser.Scene {
   onNetBullet(data){
     if (this.isHost) return
     if (data.owner === this.myPeerId){
-      const prefix = 'local_' + this.myPeerId + '_'
+      const prefix = 'local_'
       const now = performance.now()
       let fresh = false
       for (const k in this.ghostBullets){
-        if (k.startsWith(prefix) && now - this.ghostBullets[k].born < 300){ fresh = true; break }
+        if (k.startsWith(prefix + this.myPeerId) && now - this.ghostBullets[k].born < 300){ fresh = true; break }
       }
       if (fresh) return
     }
     const owner = this.views[data.owner]
-    let kind = 'normal'
-    if (data.sprayer) kind = 'sprayer'
-    else if (data.homing && data.ricochet) kind = 'homingRicochet'
-    else if (data.homing) kind = 'homing'
-    else if (data.ricochet) kind = 'ricochet'
-    if (owner){
-      const sp = this._spatial(owner.sprite.x, owner.sprite.y)
-      this.sfx.shoot(kind, sp.pan, sp.vol)
+    if (data.grenade){
+      if (owner){
+        const sp = this._spatial(owner.sprite.x, owner.sprite.y)
+        this.sfx.grenadeThrow(sp.pan, sp.vol)
+      } else {
+        this.sfx.grenadeThrow(0, 0.4)
+      }
     } else {
-      this.sfx.shoot(kind, 0, 0.4)
+      let kind = 'normal'
+      if (data.sprayer) kind = 'sprayer'
+      else if (data.homing && data.ricochet) kind = 'homingRicochet'
+      else if (data.homing) kind = 'homing'
+      else if (data.ricochet) kind = 'ricochet'
+      if (owner){
+        const sp = this._spatial(owner.sprite.x, owner.sprite.y)
+        this.sfx.shoot(kind, sp.pan, sp.vol)
+      } else {
+        this.sfx.shoot(kind, 0, 0.4)
+      }
     }
     this.spawnGhostBullet(data)
   }
   onNetHit(data){
     if (this.isHost) return
     this.applyHit(data)
+  }
+  onNetExplosion(data){
+    if (this.isHost) return
+    this.applyExplosion(data)
   }
   onNetToken(data, fromId){
     if (data.request){
@@ -1533,9 +1709,20 @@ class GameScene extends Phaser.Scene {
   }
 
   spawnPickup(){
-    /* 🆕 'oneshot' → 'sprayer' */
-    const types = ['hp','rapid','homing','ricochet','shield','sprayer']
-    const type = types[Math.floor(Math.random()*types.length)]
+    const WEIGHTS = { hp:1.2, rapid:1, homing:1, ricochet:1, shield:1, sprayer:1.5 }
+    const currentTypes = new Set(this.pickups.map(p => p.type))
+    const candidates = Object.keys(WEIGHTS).filter(t => !currentTypes.has(t))
+    if (candidates.length === 0) return
+
+    let total = 0
+    for (const t of candidates) total += WEIGHTS[t]
+    let r = Math.random() * total
+    let type = candidates[0]
+    for (const t of candidates){
+      r -= WEIGHTS[t]
+      if (r <= 0){ type = t; break }
+    }
+
     let x, y, tries = 0
     do {
       x = 100 + Math.random() * (CFG.W - 200)
@@ -1543,6 +1730,7 @@ class GameScene extends Phaser.Scene {
       tries++
     } while (this.isInsideWall(x, y, 40) && tries < 40)
     if (tries >= 40) return
+
     const id = 'pk_' + (++this.pickupSeq)
     this.pickups.push({ id, type, x, y })
     const sp = this._spatial(x, y, 0.6)
@@ -1565,7 +1753,6 @@ class GameScene extends Phaser.Scene {
     } else if (type === 'shield'){
       p.bonuses.shieldHits = (p.bonuses.shieldHits || 0) + 1
     } else if (type === 'sprayer'){
-      /* 🆕 */
       p.bonuses.sprayerUntil = now + CFG.BONUS_DURATION
     }
     if (id === this.myPeerId){
@@ -1577,7 +1764,6 @@ class GameScene extends Phaser.Scene {
   }
 
   resetBonuses(p){
-    /* 🆕 oneshotUntil → sprayerUntil */
     p.bonuses = { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 }
   }
 
@@ -1588,7 +1774,6 @@ class GameScene extends Phaser.Scene {
       const [id, type, x, y] = list[i]
       seen.add(id)
       if (!this.pickupSprites[id]){
-        /* 🆕 💀 → 💦 */
         const emoji = { hp:'❤️', rapid:'⚡', homing:'🎯', ricochet:'🏓', shield:'🛡', sprayer:'💦' }[type] || '❓'
         const t = this.add.text(x, y, emoji, { fontSize: '32px', fontFamily: 'monospace' })
           .setOrigin(0.5).setDepth(6).setAlpha(0.9)
@@ -1750,7 +1935,6 @@ class GameScene extends Phaser.Scene {
     const now = performance.now()
     const parts = []
     if (bn[4] > now){
-      /* 🆕 💦 вместо 💀 */
       parts.push(`💦 ${Math.ceil((bn[4]-now)/1000)}s`)
     } else {
       if (bn[0] > now) parts.push(`⚡ ${Math.ceil((bn[0]-now)/1000)}s`)
@@ -1861,20 +2045,28 @@ class GameScene extends Phaser.Scene {
   spawnGhostBullet(d){
     if (this.ghostBullets[d.id]) return
     let color = 0xffe066
-    /* 🆕 sprayer цвет — оранжевый */
-    if (d.sprayer) color = 0xffaa33
-    else if (d.homing && d.ricochet) color = 0xff22ff
+    let size = CFG.BULLET_SIZE
+    if (d.grenade){
+      color = 0x88dd44
+      size = CFG.GRENADE_R * 2.4
+    } else if (d.sprayer){
+      color = 0xffaa33
+      size = CFG.BULLET_SIZE * 0.7
+    } else if (d.homing && d.ricochet) color = 0xff22ff
     else if (d.homing) color = 0xff66ff
     else if (d.ricochet) color = 0x22ffff
-    const size = d.sprayer ? CFG.BULLET_SIZE * 0.7 : CFG.BULLET_SIZE
+
     const s = this.add.image(d.x, d.y, 'bullet')
       .setDisplaySize(size, size)
       .setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(5)
+
     this.ghostBullets[d.id] = {
       sprite: s, vx: d.vx, vy: d.vy, born: this.time.now,
       bouncesLeft: d.ricochet || 0,
       homing: !!d.homing,
       sprayer: !!d.sprayer,
+      grenade: !!d.grenade,
+      explodeAt: d.grenade ? this.time.now + CFG.GRENADE_FUSE : 0,
     }
   }
 
@@ -1931,16 +2123,81 @@ class GameScene extends Phaser.Scene {
     }
     if (byMe) this.cameras.main.shake(50, 0.002)
 
-    /* KILLFEED */
     if (d.dead && d.killed){
       const killerName = this.peerNames[d.by] || (d.by || '?').slice(0,6)
       const victimName = this.peerNames[d.target] || (d.target || '?').slice(0,6)
-      /* 🆕 проверяем sprayer */
       const weapon = d.sprayer ? '💦' : '🔫'
       this.addKillFeed(killerName, victimName, byMe, weapon)
       if (byMe){
         this.flashVignette()
         this.cameras.main.shake(90, 0.004)
+      }
+    }
+  }
+
+  applyExplosion(data){
+    const g = this.add.graphics().setDepth(15)
+    g.fillStyle(0xffaa33, 0.65)
+    g.fillCircle(data.x, data.y, data.r)
+    g.lineStyle(4, 0xff4400, 1)
+    g.strokeCircle(data.x, data.y, data.r)
+    this.tweens.add({
+      targets: g, alpha: 0, scale: 1.3, duration: 400,
+      onComplete: () => g.destroy(),
+    })
+    const g2 = this.add.graphics().setDepth(16)
+    g2.fillStyle(0xffffff, 0.9)
+    g2.fillCircle(data.x, data.y, data.r * 0.4)
+    this.tweens.add({
+      targets: g2, alpha: 0, scale: 2, duration: 250,
+      onComplete: () => g2.destroy(),
+    })
+
+    const sp = this._spatial(data.x, data.y, 1)
+    this.sfx.explosion(sp.pan, sp.vol)
+
+    const dx = this.local.x - data.x
+    const dy = this.local.y - data.y
+    const dist = Math.hypot(dx, dy)
+    const shakeIntensity = Math.max(0, 1 - dist / 700) * 0.012
+    if (shakeIntensity > 0.001){
+      this.cameras.main.shake(220, shakeIntensity)
+    }
+
+    if (Array.isArray(data.hits)){
+      for (const h of data.hits){
+        if (h.tid === this.myPeerId){
+          if (h.blocked){
+            this.sfx.hitShield(0, 1)
+            this.cameras.main.flash(120, 100, 200, 255)
+            if (this.localBonuses[3] > 0) this.localBonuses[3]--
+          } else {
+            this.local.hp = h.hp
+            this.local.dead = !!h.dead
+            this.cameras.main.flash(150, 255, 30, 100)
+            this.sfx.hitPlayer(0, 1)
+            if (h.dead){
+              this.sfx.death(0, 1)
+              this.localBonuses = [0, 0, 0, 0, 0]
+              this.dash.cdUntil = 0
+              this.dash.until = 0
+            }
+          }
+        }
+        const v = this.views[h.tid]
+        if (v){
+          v.hp = h.hp
+          if (h.dead) v.dead = true
+        }
+      }
+      for (const h of data.hits){
+        if (h.killed){
+          const killerName = this.peerNames[data.owner] || (data.owner || '?').slice(0,6)
+          const victimName = this.peerNames[h.tid] || (h.tid || '?').slice(0,6)
+          const byMe = data.owner === this.myPeerId
+          this.addKillFeed(killerName, victimName, byMe, '💣')
+          if (byMe) this.flashVignette()
+        }
       }
     }
   }
@@ -1979,7 +2236,6 @@ class GameScene extends Phaser.Scene {
     }
     if (this.voteActive) this.checkVoteResult()
 
-    /* движение с учётом dash */
     if (!this.local.dead){
       const now = performance.now()
       let speed = CFG.SPEED
@@ -2025,6 +2281,7 @@ class GameScene extends Phaser.Scene {
           f: this.firing ? 1 : 0,
           d: this.local.dead ? 1 : 0,
           dseq: this.dashSeq,
+          w: this.weapon === 'grenade' ? 1 : 0,
         }
         payload.sig = this.ac.sign(payload)
         this.sendInput(payload, hostId)
@@ -2038,6 +2295,7 @@ class GameScene extends Phaser.Scene {
         f: this.firing ? 1 : 0,
         d: this.local.dead ? 1 : 0,
         dseq: this.dashSeq,
+        w: this.weapon === 'grenade' ? 1 : 0,
         _t: time,
       }
       this.simulateHost(time, dt)
@@ -2045,30 +2303,40 @@ class GameScene extends Phaser.Scene {
 
     if (!this.isHost && !this.local.dead){
       const now = performance.now()
-      const behavior = this._computeFireBehavior(this.localBonuses, now)
-      if (this.firing && time - this._lastLocalShot > behavior.fireCd){
-        this._lastLocalShot = time
-        const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
-        const ax = this.aimVec.x / len
-        const ay = this.aimVec.y / len
-        this.sfx.shoot(behavior.kind, 0, 1)
+      if (this.weapon === 'grenade'){
+        if (this.firing && time - this._lastLocalShot > CFG.GRENADE_CD){
+          this._lastLocalShot = time
+          const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
+          const ax = this.aimVec.x / len
+          const ay = this.aimVec.y / len
+          this.sfx.grenadeThrow(0, 1)
+          this.spawnLocalGrenade(ax, ay)
+        }
+      } else {
+        const behavior = this._computeFireBehavior(this.localBonuses, now)
+        if (this.firing && time - this._lastLocalShot > behavior.fireCd){
+          this._lastLocalShot = time
+          const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
+          const ax = this.aimVec.x / len
+          const ay = this.aimVec.y / len
+          this.sfx.shoot(behavior.kind, 0, 1)
 
-        /* 🆕 распылитель локально — много пуль */
-        if (behavior.opts.sprayer){
-          this.spawnLocalSprayer(ax, ay)
-        } else {
-          const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
-          this.spawnGhostBullet({
-            id,
-            x: this.local.x + ax * (CFG.PLAYER_R + 6),
-            y: this.local.y + ay * (CFG.PLAYER_R + 6),
-            vx: ax * CFG.BULLET_SPEED,
-            vy: ay * CFG.BULLET_SPEED,
-            owner: this.myPeerId,
-            homing: behavior.opts.homing,
-            ricochet: behavior.opts.ricochet,
-            sprayer: false,
-          })
+          if (behavior.opts.sprayer){
+            this.spawnLocalSprayer(ax, ay)
+          } else {
+            const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
+            this.spawnGhostBullet({
+              id,
+              x: this.local.x + ax * (CFG.PLAYER_R + 6),
+              y: this.local.y + ay * (CFG.PLAYER_R + 6),
+              vx: ax * CFG.BULLET_SPEED,
+              vy: ay * CFG.BULLET_SPEED,
+              owner: this.myPeerId,
+              homing: behavior.opts.homing,
+              ricochet: behavior.opts.ricochet,
+              sprayer: false,
+            })
+          }
         }
       }
     }
@@ -2081,10 +2349,23 @@ class GameScene extends Phaser.Scene {
       this.renderScores()
       this.renderBonuses()
       this.updateDashButton()
+      this.updateWeaponButton()
     }
   }
 
-  /* 🆕 локальное предсказание распылителя */
+  spawnLocalGrenade(ax, ay){
+    const id = 'local_g_' + this.myPeerId + '_' + (++this.bulletSeq)
+    this.spawnGhostBullet({
+      id,
+      x: this.local.x + ax * (CFG.PLAYER_R + 6),
+      y: this.local.y + ay * (CFG.PLAYER_R + 6),
+      vx: ax * CFG.GRENADE_SPEED,
+      vy: ay * CFG.GRENADE_SPEED,
+      owner: this.myPeerId,
+      grenade: true,
+    })
+  }
+
   spawnLocalSprayer(ax, ay){
     const baseAngle = Math.atan2(ay, ax)
     const spread = CFG.BONUS_SPRAYER_SPREAD_DEG * Math.PI / 180
@@ -2127,13 +2408,12 @@ class GameScene extends Phaser.Scene {
       let inp = this.inputs[id] || { m:[0,0], a:[1,0], f:0 }
       const lastInputAge = time - (inp._t || 0)
       if (lastInputAge > 500 && id !== this.myPeerId){
-        inp = { m:[0,0], a: inp.a || [1,0], f: 0 }
+        inp = { m:[0,0], a: inp.a || [1,0], f: 0, w: inp.w || 0 }
       }
       if (!p.bonuses) this.resetBonuses(p)
       if (typeof p.dashUntil !== 'number') p.dashUntil = 0
       if (typeof p.lastDseq !== 'number') p.lastDseq = 0
 
-      /* DASH от игрока */
       if (inp.dseq && inp.dseq > p.lastDseq){
         p.lastDseq = inp.dseq
         if (!p.dead){
@@ -2191,25 +2471,33 @@ class GameScene extends Phaser.Scene {
         p.bonuses.sprayerUntil || 0,
       ]
       const behavior = this._computeFireBehavior(bnArr, now)
+      const wantsGrenade = (inp.w === 1)
+      const fireCd = wantsGrenade ? CFG.GRENADE_CD : behavior.fireCd
 
-      if (inp.f && time - p.fireAt > behavior.fireCd){
-        if (!this.ac.validateFire(id, time, behavior.fireCd)) continue
+      if (inp.f && time - p.fireAt > fireCd){
+        if (!this.ac.validateFire(id, time, fireCd)) continue
         const len = Math.hypot(p.aimX, p.aimY) || 1
         const ax = p.aimX/len, ay = p.aimY/len
         p.fireAt = time
 
-        if (id === this.myPeerId){
-          this.sfx.shoot(behavior.kind, 0, 1)
+        if (wantsGrenade){
+          if (id === this.myPeerId) this.sfx.grenadeThrow(0, 1)
+          else {
+            const sp = this._spatial(p.x, p.y)
+            this.sfx.grenadeThrow(sp.pan, sp.vol)
+          }
+          this.hostSpawnGrenade(id, p.x, p.y, ax, ay)
         } else {
-          const sp = this._spatial(p.x, p.y)
-          this.sfx.shoot(behavior.kind, sp.pan, sp.vol)
-        }
-
-        /* 🆕 распылитель → много пуль */
-        if (behavior.opts.sprayer){
-          this.hostSpawnSprayer(id, p.x, p.y, ax, ay)
-        } else {
-          this.hostSpawnBullet(id, p.x, p.y, ax, ay, behavior.opts)
+          if (id === this.myPeerId) this.sfx.shoot(behavior.kind, 0, 1)
+          else {
+            const sp = this._spatial(p.x, p.y)
+            this.sfx.shoot(behavior.kind, sp.pan, sp.vol)
+          }
+          if (behavior.opts.sprayer){
+            this.hostSpawnSprayer(id, p.x, p.y, ax, ay)
+          } else {
+            this.hostSpawnBullet(id, p.x, p.y, ax, ay, behavior.opts)
+          }
         }
       }
 
@@ -2231,6 +2519,37 @@ class GameScene extends Phaser.Scene {
 
     for (let i = this.bullets.length - 1; i >= 0; i--){
       const b = this.bullets[i]
+
+      if (b.isGrenade){
+        const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
+        b.vx *= drag
+        b.vy *= drag
+
+        let nx = b.x + b.vx * dt
+        let ny = b.y + b.vy * dt
+
+        let hitWall = false
+        for (const r of this.wallRects){
+          if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
+              ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
+            hitWall = true
+            const rres = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
+            if (rres){ nx = rres.x; ny = rres.y }
+            break
+          }
+        }
+        if (hitWall){ b.vx = 0; b.vy = 0 }
+
+        b.x = nx
+        b.y = ny
+
+        if (time > b.explodeAt){
+          this.hostExplodeGrenade(b, time)
+          this.bullets.splice(i, 1)
+          continue
+        }
+        continue
+      }
 
       if (b.homing){
         let nearest = null, nd = Infinity
@@ -2314,7 +2633,6 @@ class GameScene extends Phaser.Scene {
             t.bonuses.shieldHits--
             blocked = true
           } else {
-            /* 🆕 используем b.damage вместо oneshot */
             const dmg = (typeof b.damage === 'number') ? b.damage : CFG.DAMAGE
             t.hp -= dmg
           }
@@ -2327,7 +2645,6 @@ class GameScene extends Phaser.Scene {
             const shooter = this.worldPlayers[b.owner]
             if (shooter) shooter.score = (shooter.score || 0) + 1
           }
-          /* 🆕 передаём sprayer-флаг для килфида */
           const hd = {
             bid: b.id, target: tid, by: b.owner, hp: t.hp,
             dead: t.dead, killed, blocked, sprayer: !!b.sprayer,
@@ -2413,8 +2730,8 @@ class GameScene extends Phaser.Scene {
       owner: ownerId, born: this.time.now,
       homing: !!opts.homing,
       bouncesLeft: opts.ricochet || 0,
-      damage: CFG.DAMAGE,     /* 🆕 всегда свой урон */
-      sprayer: false,          /* 🆕 */
+      damage: CFG.DAMAGE,
+      sprayer: false,
     }
     this.bullets.push(b)
     const payload = {
@@ -2425,7 +2742,6 @@ class GameScene extends Phaser.Scene {
     this.spawnGhostBullet(payload)
   }
 
-  /* 🆕 распылитель — 7 пуль веером */
   hostSpawnSprayer(ownerId, x, y, ax, ay){
     const baseAngle = Math.atan2(ay, ax)
     const spread = CFG.BONUS_SPRAYER_SPREAD_DEG * Math.PI / 180
@@ -2448,7 +2764,7 @@ class GameScene extends Phaser.Scene {
         owner: ownerId, born: this.time.now,
         homing: false,
         bouncesLeft: 0,
-        damage: dmg,          /* 🆕 половинный урон */
+        damage: dmg,
         sprayer: true,
       }
       this.bullets.push(b)
@@ -2461,9 +2777,112 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  hostSpawnGrenade(ownerId, x, y, ax, ay){
+    const len = Math.hypot(ax, ay) || 1
+    const id = this.myPeerId + '-g-' + (++this.bulletSeq)
+    const b = {
+      id,
+      x: x + (ax/len)*(CFG.PLAYER_R+6),
+      y: y + (ay/len)*(CFG.PLAYER_R+6),
+      vx: (ax/len)*CFG.GRENADE_SPEED,
+      vy: (ay/len)*CFG.GRENADE_SPEED,
+      owner: ownerId,
+      born: this.time.now,
+      explodeAt: this.time.now + CFG.GRENADE_FUSE,
+      isGrenade: true,
+    }
+    this.bullets.push(b)
+    const payload = {
+      id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, owner: ownerId,
+      grenade: true,
+    }
+    this.sendBullet(payload)
+    this.spawnGhostBullet(payload)
+  }
+
+  hostExplodeGrenade(b, time){
+    const R = CFG.GRENADE_RADIUS
+    const R2 = R * R
+    const hits = []
+
+    for (const tid in this.worldPlayers){
+      const t = this.worldPlayers[tid]
+      if (t.dead) continue
+      const dx = t.x - b.x
+      const dy = t.y - b.y
+      const d2 = dx*dx + dy*dy
+      if (d2 > R2) continue
+
+      const dist = Math.sqrt(d2)
+      const falloff = 1 - dist / R
+      let dmg = CFG.GRENADE_DAMAGE * falloff
+      if (tid === b.owner) dmg *= CFG.GRENADE_SELF_DAMAGE_MUL
+      dmg = Math.round(dmg)
+      if (dmg < 1) continue
+
+      let blocked = false
+      if (t.bonuses && t.bonuses.shieldHits > 0){
+        t.bonuses.shieldHits--
+        blocked = true
+      } else {
+        t.hp -= dmg
+      }
+      let killed = false
+      if (!blocked && t.hp <= 0){
+        t.hp = 0
+        t.dead = true
+        t.respawnAt = time + CFG.RESPAWN
+        t.dashUntil = 0
+        killed = true
+        this.resetBonuses(t)
+        const shooter = this.worldPlayers[b.owner]
+        if (shooter) shooter.score = (shooter.score || 0) + 1
+      }
+      hits.push({ tid, hp: t.hp, dead: t.dead ? 1 : 0, blocked, killed, dmg })
+    }
+
+    const payload = {
+      id: b.id, owner: b.owner,
+      x: Math.round(b.x), y: Math.round(b.y),
+      r: R, hits,
+    }
+    this.sendExplosion(payload)
+    this.applyExplosion(payload)
+  }
+
   updateGhostBullets(time, dt){
     for (const id in this.ghostBullets){
       const g = this.ghostBullets[id]
+
+      if (g.grenade){
+        const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
+        g.vx *= drag
+        g.vy *= drag
+
+        let nx = g.sprite.x + g.vx * dt
+        let ny = g.sprite.y + g.vy * dt
+
+        let hitWall = false
+        for (const r of this.wallRects){
+          if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
+              ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
+            hitWall = true
+            const rres = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
+            if (rres){ nx = rres.x; ny = rres.y }
+            break
+          }
+        }
+        if (hitWall){ g.vx = 0; g.vy = 0 }
+
+        g.sprite.x = nx
+        g.sprite.y = ny
+
+        if (time > g.explodeAt){
+          g.sprite.destroy()
+          delete this.ghostBullets[id]
+        }
+        continue
+      }
 
       if (g.homing){
         let nearest = null, nd = Infinity
