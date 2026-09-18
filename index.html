@@ -63,7 +63,7 @@
             font:clamp(10px,1.6vmin,14px) monospace;
             z-index:7;text-align:right;pointer-events:none;white-space:pre;line-height:1.4;}
 
-  /* ====== ACTION BUTTONS (стек: weapon + dash) ====== */
+  /* ====== ACTION BUTTONS ====== */
   #actionBtns{
     position:fixed;
     right:4vw;
@@ -215,9 +215,9 @@
   <button id="playBtn">ИГРАТЬ</button>
   <div id="hint">
     Левый стик — движение<br>
-    Правый стик — прицел/огонь · 💣 держи и целься, отпусти для броска (отклонение = сила)<br>
+    Правый стик — прицел и огонь<br>
+    💣 — гранаты: удерживай и отпусти (сила = дальность)<br>
     ⚡ — рывок (кулдаун 1.4с)<br>
-    💣/🔫 — смена оружия (ружьё / гранаты)<br>
     Бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💦 распылитель
   </div>
   <div id="pid">…generating identity…</div>
@@ -268,8 +268,6 @@ const CFG = {
   DASH_CD: 1400,
 
   GRENADE_SPEED: 750,
-  GRENADE_GRAVITY: 900,
-  GRENADE_BOUNCE: 0.38,
   GRENADE_R: 10,
   GRENADE_FUSE: 1500,
   GRENADE_CD: 1800,
@@ -277,7 +275,6 @@ const CFG = {
   GRENADE_DAMAGE: 60,
   GRENADE_SELF_DAMAGE_MUL: 0.5,
   GRENADE_DRAG_K: 1.2,
-  /* 🆕 минимальная сила броска (иначе граната падает под ноги) */
   GRENADE_MIN_FORCE: 0.3,
 
   SFX_MAX_DIST:      1400,
@@ -842,12 +839,12 @@ class AntiCheat {
   }
   setMyToken(tok){ this.myToken = tok }
   sign(fields){
-    const s = `${this.myToken}|${this.seq}|${fields.m[0]}|${fields.m[1]}|${fields.a[0]}|${fields.a[1]}|${fields.f}|${fields.gseq||0}`
+    const s = `${this.myToken}|${this.seq}|${fields.m[0]}|${fields.m[1]}|${fields.a[0]}|${fields.a[1]}|${fields.f}`
     return fnv1a(s)
   }
   verify(id, payload){
     const p = this.peers.get(id); if (!p || !p.token) return false
-    const s = `${p.token}|${payload.seq}|${payload.m[0]}|${payload.m[1]}|${payload.a[0]}|${payload.a[1]}|${payload.f}|${payload.gseq||0}`
+    const s = `${p.token}|${payload.seq}|${payload.m[0]}|${payload.m[1]}|${payload.a[0]}|${payload.a[1]}|${payload.f}`
     return fnv1a(s) === payload.sig
   }
   validateInput(id, data){
@@ -863,17 +860,15 @@ class AntiCheat {
     if (typeof data.f !== 'number' || (data.f !== 0 && data.f !== 1)) return this.strike(id, 'bad fire', AC_CFG.STRIKE_SEVERE)
     if (typeof data.seq !== 'number' || !Number.isFinite(data.seq)) return this.strike(id, 'no seq', AC_CFG.STRIKE_SEVERE)
     if (data.w !== undefined && data.w !== 0 && data.w !== 1) return this.strike(id, 'bad weapon', AC_CFG.STRIKE_SEVERE)
-    /* 🆕 aim force (0..1, небольшой запас до 1.5) */
     if (data.af !== undefined){
       if (typeof data.af !== 'number' || !Number.isFinite(data.af))
         return this.strike(id, 'bad aimforce', AC_CFG.STRIKE_SEVERE)
       if (data.af < 0 || data.af > 1.5)
         return this.strike(id, 'aimforce range', AC_CFG.STRIKE_SEVERE)
     }
-    if (data.gseq !== undefined){
-      if (typeof data.gseq !== 'number' || !Number.isFinite(data.gseq) ||
-          !Number.isInteger(data.gseq) || data.gseq < 0 || data.gseq > 1000000000)
-        return this.strike(id, 'bad grenadeseq', AC_CFG.STRIKE_SEVERE)
+    if (data.tseq !== undefined){
+      if (typeof data.tseq !== 'number' || !Number.isFinite(data.tseq) || data.tseq < 0 || data.tseq > 1e9)
+        return this.strike(id, 'bad tseq', AC_CFG.STRIKE_SEVERE)
     }
     p.inputTimes.push(now)
     while (p.inputTimes.length && now - p.inputTimes[0] > 1000) p.inputTimes.shift()
@@ -1112,10 +1107,10 @@ class GameScene extends Phaser.Scene {
     this.dashSeq = 0
 
     this.weapon = 'rifle'
-    /* Граната: сила = радиус правого стика, бросок происходит только на отпускании */
-    this.aimForce = CFG.GRENADE_MIN_FORCE
-    this.grenadeChargeStart = 0
-    this.grenadeThrowSeq = 0
+    this.aimForce = 0.5
+    /* 🆕 счётчик брошенных гранат */
+    this.throwSeq = 0
+    this.lastLocalThrow = 0
 
     this.hostBlacklist = new Set()
     this.votes = new Map()
@@ -1167,7 +1162,6 @@ class GameScene extends Phaser.Scene {
 
     this.setupNetwork()
 
-    /* гарантированный первый 💦 через 1.5 сек (только хост) */
     this.time.delayedCall(1500, ()=>{
       if (!this.isHost) return
       const angle = Math.random() * Math.PI * 2
@@ -1368,29 +1362,42 @@ class GameScene extends Phaser.Scene {
       zone: document.getElementById('joyR'), mode:'static',
       position:{left:'50%',top:'50%'}, color:'#ff2266', size:110, threshold:0.1,
     })
-    joyR.on('start', ()=>{
-      this.firing = true
-      if (this.weapon === 'grenade'){
-        this.grenadeChargeStart = performance.now()
-        this.aimForce = CFG.GRENADE_MIN_FORCE
-      }
-    })
+    joyR.on('start', ()=>{ this.firing = true })
     joyR.on('move', (e,d)=>{
       const f = Math.min(d.force,1)
       const ax = Math.cos(d.angle.radian), ay = -Math.sin(d.angle.radian)
       if (f > 0.15){
         this.aimVec.x = ax; this.aimVec.y = ay
-        if (this.weapon === 'grenade'){
-          this.aimForce = clamp(f, CFG.GRENADE_MIN_FORCE, 1)
-        }
+        this.aimForce = f
       }
       this.firing = f > 0.25
     })
+    /* 🆕 БРОСОК ПО ОТПУСКАНИЮ */
     joyR.on('end', ()=>{
-      const wasGrenade = this.weapon === 'grenade'
+      const wasFiring = this.firing
       this.firing = false
-      if (wasGrenade) this.releaseGrenade()
+      if (wasFiring && this.weapon === 'grenade' && !this.local.dead){
+        this._doGrenadeThrow()
+      }
     })
+  }
+
+  /* 🆕 выполнить бросок гранаты (на отпускании стика) */
+  _doGrenadeThrow(){
+    const now = performance.now()
+    if (now - this.lastLocalThrow < CFG.GRENADE_CD) return
+    this.lastLocalThrow = now
+    this.throwSeq++
+
+    /* для хоста не предсказываем локально — он сам авторитетно бросит через simulateHost */
+    if (this.isHost) return
+
+    const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
+    const ax = this.aimVec.x / len
+    const ay = this.aimVec.y / len
+    const force = clamp(this.aimForce || 1, CFG.GRENADE_MIN_FORCE, 1)
+    this.sfx.grenadeThrow(0, 1)
+    this.spawnLocalGrenade(ax, ay, force)
   }
 
   _spatial(srcX, srcY, mul=1){
@@ -1851,7 +1858,8 @@ class GameScene extends Phaser.Scene {
       vx:0, vy:0, aimX:1, aimY:0,
       hp: CFG.MAX_HP, dead:false, fireAt:0, respawnAt:0, score:0,
       bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 },
-      dashUntil: 0, dashDirX: 1, dashDirY: 0, lastDseq: 0, lastGrenadeSeq: 0,
+      dashUntil: 0, dashDirX: 1, dashDirY: 0, lastDseq: 0,
+      lastTseq: 0, lastThrow: 0,
     }
     if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
   }
@@ -1873,7 +1881,8 @@ class GameScene extends Phaser.Scene {
         hp: v ? v.hp : CFG.MAX_HP, dead: v ? v.dead : false,
         fireAt:0, respawnAt:0, score:0,
         bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 },
-        dashUntil: 0, dashDirX: 1, dashDirY: 0, lastDseq: 0, lastGrenadeSeq: 0,
+        dashUntil: 0, dashDirX: 1, dashDirY: 0, lastDseq: 0,
+        lastTseq: 0, lastThrow: 0,
       }
       if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
     }
@@ -2091,16 +2100,9 @@ class GameScene extends Phaser.Scene {
     else if (d.homing) color = 0xff66ff
     else if (d.ricochet) color = 0x22ffff
 
-    let s
-    if (d.grenade){
-      s = this.add.circle(d.x, d.y, CFG.GRENADE_R, color, 1)
-        .setStrokeStyle(3, 0xffffff, 0.75)
-        .setDepth(5)
-    } else {
-      s = this.add.image(d.x, d.y, 'bullet')
-        .setDisplaySize(size, size)
-        .setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(5)
-    }
+    const s = this.add.image(d.x, d.y, 'bullet')
+      .setDisplaySize(size, size)
+      .setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(5)
 
     this.ghostBullets[d.id] = {
       sprite: s, vx: d.vx, vy: d.vy, born: this.time.now,
@@ -2311,6 +2313,9 @@ class GameScene extends Phaser.Scene {
       }
     }
 
+    /* 🆕 f=1 только для ружья (гранаты — через tseq) */
+    const firingFlag = (this.weapon === 'rifle' && this.firing) ? 1 : 0
+
     if (!this.isHost && time - this.lastInputSent > CFG.INPUT_MS){
       this.lastInputSent = time
       const hostId = this.currentHostId()
@@ -2320,11 +2325,12 @@ class GameScene extends Phaser.Scene {
           seq: this.ac.seq,
           m: [this.moveVec.x, this.moveVec.y],
           a: [this.aimVec.x, this.aimVec.y],
-          f: this.firing ? 1 : 0,
+          f: firingFlag,
           d: this.local.dead ? 1 : 0,
           dseq: this.dashSeq,
           w: this.weapon === 'grenade' ? 1 : 0,
-          af: this.aimForce,               /* 🆕 */
+          af: this.aimForce,
+          tseq: this.throwSeq,       /* 🆕 */
         }
         payload.sig = this.ac.sign(payload)
         this.sendInput(payload, hostId)
@@ -2335,45 +2341,43 @@ class GameScene extends Phaser.Scene {
       this.inputs[this.myPeerId] = {
         m: [this.moveVec.x, this.moveVec.y],
         a: [this.aimVec.x, this.aimVec.y],
-        f: this.firing ? 1 : 0,
+        f: firingFlag,
         d: this.local.dead ? 1 : 0,
         dseq: this.dashSeq,
         w: this.weapon === 'grenade' ? 1 : 0,
-        af: this.aimForce,                 /* 🆕 */
+        af: this.aimForce,
+        tseq: this.throwSeq,       /* 🆕 */
         _t: time,
       }
       this.simulateHost(time, dt)
     }
 
-    if (!this.isHost && !this.local.dead){
+    /* 🆕 клиент стреляет из ружья (гранаты — только по отпусканию) */
+    if (!this.isHost && !this.local.dead && this.weapon === 'rifle'){
       const now = performance.now()
-      if (this.weapon === 'grenade'){
-        /* Бросок выполняется один раз в releaseGrenade(), при отпускании стика. */
-      } else {
-        const behavior = this._computeFireBehavior(this.localBonuses, now)
-        if (this.firing && time - this._lastLocalShot > behavior.fireCd){
-          this._lastLocalShot = time
-          const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
-          const ax = this.aimVec.x / len
-          const ay = this.aimVec.y / len
-          this.sfx.shoot(behavior.kind, 0, 1)
+      const behavior = this._computeFireBehavior(this.localBonuses, now)
+      if (this.firing && time - this._lastLocalShot > behavior.fireCd){
+        this._lastLocalShot = time
+        const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
+        const ax = this.aimVec.x / len
+        const ay = this.aimVec.y / len
+        this.sfx.shoot(behavior.kind, 0, 1)
 
-          if (behavior.opts.sprayer){
-            this.spawnLocalSprayer(ax, ay)
-          } else {
-            const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
-            this.spawnGhostBullet({
-              id,
-              x: this.local.x + ax * (CFG.PLAYER_R + 6),
-              y: this.local.y + ay * (CFG.PLAYER_R + 6),
-              vx: ax * CFG.BULLET_SPEED,
-              vy: ay * CFG.BULLET_SPEED,
-              owner: this.myPeerId,
-              homing: behavior.opts.homing,
-              ricochet: behavior.opts.ricochet,
-              sprayer: false,
-            })
-          }
+        if (behavior.opts.sprayer){
+          this.spawnLocalSprayer(ax, ay)
+        } else {
+          const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
+          this.spawnGhostBullet({
+            id,
+            x: this.local.x + ax * (CFG.PLAYER_R + 6),
+            y: this.local.y + ay * (CFG.PLAYER_R + 6),
+            vx: ax * CFG.BULLET_SPEED,
+            vy: ay * CFG.BULLET_SPEED,
+            owner: this.myPeerId,
+            homing: behavior.opts.homing,
+            ricochet: behavior.opts.ricochet,
+            sprayer: false,
+          })
         }
       }
     }
@@ -2390,25 +2394,6 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  releaseGrenade(){
-    if (this.local.dead || this.weapon !== 'grenade') return
-    const now = performance.now()
-    if (now - this._lastLocalShot < CFG.GRENADE_CD) return
-
-    const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
-    const ax = this.aimVec.x / len
-    const ay = this.aimVec.y / len
-    const force = clamp(this.aimForce || CFG.GRENADE_MIN_FORCE, CFG.GRENADE_MIN_FORCE, 1)
-
-    this._lastLocalShot = now
-    this.grenadeThrowSeq++
-    this.sfx.grenadeThrow(0, 1)
-
-    /* Клиентская визуальная предикция; хост создаёт авторитетную гранату по gseq. */
-    if (!this.isHost) this.spawnLocalGrenade(ax, ay, force)
-  }
-
-  /* локальная граната — скорость зависит от силы стика */
   spawnLocalGrenade(ax, ay, force){
     const id = 'local_' + this.myPeerId + '_g' + (++this.bulletSeq)
     const speed = CFG.GRENADE_SPEED * (force || 1)
@@ -2465,12 +2450,15 @@ class GameScene extends Phaser.Scene {
       let inp = this.inputs[id] || { m:[0,0], a:[1,0], f:0 }
       const lastInputAge = time - (inp._t || 0)
       if (lastInputAge > 500 && id !== this.myPeerId){
-        inp = { m:[0,0], a: inp.a || [1,0], f: 0, w: inp.w || 0, af: inp.af, gseq: inp.gseq || 0 }
+        inp = { m:[0,0], a: inp.a || [1,0], f: 0, w: inp.w || 0, af: inp.af, tseq: inp.tseq }
       }
       if (!p.bonuses) this.resetBonuses(p)
       if (typeof p.dashUntil !== 'number') p.dashUntil = 0
       if (typeof p.lastDseq !== 'number') p.lastDseq = 0
+      if (typeof p.lastTseq !== 'number') p.lastTseq = 0
+      if (typeof p.lastThrow !== 'number') p.lastThrow = 0
 
+      /* DASH */
       if (inp.dseq && inp.dseq > p.lastDseq){
         p.lastDseq = inp.dseq
         if (!p.dead){
@@ -2486,6 +2474,24 @@ class GameScene extends Phaser.Scene {
             const sp = this._spatial(p.x, p.y, 0.9)
             this.sfx.dash(sp.pan, sp.vol)
           }
+        }
+      }
+
+      /* 🆕 БРОСОК ГРАНАТЫ через tseq */
+      if (inp.tseq && inp.tseq > p.lastTseq){
+        p.lastTseq = inp.tseq
+        if (!p.dead && (time - p.lastThrow) > CFG.GRENADE_CD * AC_CFG.FIRE_TOLERANCE){
+          p.lastThrow = time
+          const len = Math.hypot(p.aimX, p.aimY) || 1
+          const ax = p.aimX / len
+          const ay = p.aimY / len
+          const force = clamp(typeof inp.af === 'number' ? inp.af : 1, CFG.GRENADE_MIN_FORCE, 1)
+          if (id === this.myPeerId) this.sfx.grenadeThrow(0, 1)
+          else {
+            const sp = this._spatial(p.x, p.y)
+            this.sfx.grenadeThrow(sp.pan, sp.vol)
+          }
+          this.hostSpawnGrenade(id, p.x, p.y, ax, ay, force)
         }
       }
 
@@ -2528,42 +2534,23 @@ class GameScene extends Phaser.Scene {
         p.bonuses.sprayerUntil || 0,
       ]
       const behavior = this._computeFireBehavior(bnArr, now)
-      const wantsGrenade = (inp.w === 1)
-      const fireCd = wantsGrenade ? CFG.GRENADE_CD : behavior.fireCd
 
-      const grenadeSeq = Number.isInteger(inp.gseq) ? inp.gseq : 0
-      const grenadeReleased = wantsGrenade && grenadeSeq > (p.lastGrenadeSeq || 0)
-      if (grenadeReleased){
-        p.lastGrenadeSeq = grenadeSeq
-        if (time - p.fireAt > CFG.GRENADE_CD){
-          if (!this.ac.validateFire(id, time, CFG.GRENADE_CD)) continue
-          const len = Math.hypot(p.aimX, p.aimY) || 1
-          const ax = p.aimX/len, ay = p.aimY/len
-          const force = clamp(typeof inp.af === 'number' ? inp.af : CFG.GRENADE_MIN_FORCE, CFG.GRENADE_MIN_FORCE, 1)
-          p.fireAt = time
-          if (id === this.myPeerId) this.sfx.grenadeThrow(0, 1)
-          else {
-            const sp = this._spatial(p.x, p.y)
-            this.sfx.grenadeThrow(sp.pan, sp.vol)
-          }
-          this.hostSpawnGrenade(id, p.x, p.y, ax, ay, force)
-        }
-      } else if (inp.f && time - p.fireAt > fireCd){
-        if (!this.ac.validateFire(id, time, fireCd)) continue
+      /* 🆕 стрельба только для ружья (гранаты — через tseq выше) */
+      if (inp.w !== 1 && inp.f && time - p.fireAt > behavior.fireCd){
+        if (!this.ac.validateFire(id, time, behavior.fireCd)) continue
         const len = Math.hypot(p.aimX, p.aimY) || 1
         const ax = p.aimX/len, ay = p.aimY/len
         p.fireAt = time
-        {
-          if (id === this.myPeerId) this.sfx.shoot(behavior.kind, 0, 1)
-          else {
-            const sp = this._spatial(p.x, p.y)
-            this.sfx.shoot(behavior.kind, sp.pan, sp.vol)
-          }
-          if (behavior.opts.sprayer){
-            this.hostSpawnSprayer(id, p.x, p.y, ax, ay)
-          } else {
-            this.hostSpawnBullet(id, p.x, p.y, ax, ay, behavior.opts)
-          }
+
+        if (id === this.myPeerId) this.sfx.shoot(behavior.kind, 0, 1)
+        else {
+          const sp = this._spatial(p.x, p.y)
+          this.sfx.shoot(behavior.kind, sp.pan, sp.vol)
+        }
+        if (behavior.opts.sprayer){
+          this.hostSpawnSprayer(id, p.x, p.y, ax, ay)
+        } else {
+          this.hostSpawnBullet(id, p.x, p.y, ax, ay, behavior.opts)
         }
       }
 
@@ -2587,42 +2574,24 @@ class GameScene extends Phaser.Scene {
       const b = this.bullets[i]
 
       if (b.isGrenade){
-        /* Баллистический полёт: граната не летит как пуля. */
         const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
         b.vx *= drag
         b.vy *= drag
-        b.vy += CFG.GRENADE_GRAVITY * dt
 
         let nx = b.x + b.vx * dt
         let ny = b.y + b.vy * dt
 
+        let hitWall = false
         for (const r of this.wallRects){
           if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
               ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
+            hitWall = true
             const rres = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
             if (rres){ nx = rres.x; ny = rres.y }
-
-            const cx = r.x + r.w/2, cy = r.y + r.h/2
-            const dx = nx - cx, dy = ny - cy
-            if (Math.abs(dx)/(r.w/2 + CFG.GRENADE_R) > Math.abs(dy)/(r.h/2 + CFG.GRENADE_R)){
-              b.vx *= -CFG.GRENADE_BOUNCE
-            } else {
-              b.vy *= -CFG.GRENADE_BOUNCE
-              b.vx *= 0.72
-            }
             break
           }
         }
-
-        if (nx <= CFG.GRENADE_R || nx >= CFG.W-CFG.GRENADE_R){
-          nx = clamp(nx, CFG.GRENADE_R, CFG.W-CFG.GRENADE_R)
-          b.vx *= -CFG.GRENADE_BOUNCE
-        }
-        if (ny <= CFG.GRENADE_R || ny >= CFG.H-CFG.GRENADE_R){
-          ny = clamp(ny, CFG.GRENADE_R, CFG.H-CFG.GRENADE_R)
-          b.vy *= -CFG.GRENADE_BOUNCE
-          b.vx *= 0.72
-        }
+        if (hitWall){ b.vx = 0; b.vy = 0 }
 
         b.x = nx
         b.y = ny
@@ -2861,7 +2830,6 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  /* 🆕 граната — скорость зависит от force */
   hostSpawnGrenade(ownerId, x, y, ax, ay, force){
     const len = Math.hypot(ax, ay) || 1
     const id = this.myPeerId + '-g-' + (++this.bulletSeq)
@@ -2944,38 +2912,21 @@ class GameScene extends Phaser.Scene {
         const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
         g.vx *= drag
         g.vy *= drag
-        g.vy += CFG.GRENADE_GRAVITY * dt
 
         let nx = g.sprite.x + g.vx * dt
         let ny = g.sprite.y + g.vy * dt
 
+        let hitWall = false
         for (const r of this.wallRects){
           if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
               ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
+            hitWall = true
             const rres = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
             if (rres){ nx = rres.x; ny = rres.y }
-
-            const cx = r.x + r.w/2, cy = r.y + r.h/2
-            const dx = nx - cx, dy = ny - cy
-            if (Math.abs(dx)/(r.w/2 + CFG.GRENADE_R) > Math.abs(dy)/(r.h/2 + CFG.GRENADE_R)){
-              g.vx *= -CFG.GRENADE_BOUNCE
-            } else {
-              g.vy *= -CFG.GRENADE_BOUNCE
-              g.vx *= 0.72
-            }
             break
           }
         }
-
-        if (nx <= CFG.GRENADE_R || nx >= CFG.W-CFG.GRENADE_R){
-          nx = clamp(nx, CFG.GRENADE_R, CFG.W-CFG.GRENADE_R)
-          g.vx *= -CFG.GRENADE_BOUNCE
-        }
-        if (ny <= CFG.GRENADE_R || ny >= CFG.H-CFG.GRENADE_R){
-          ny = clamp(ny, CFG.GRENADE_R, CFG.H-CFG.GRENADE_R)
-          g.vy *= -CFG.GRENADE_BOUNCE
-          g.vx *= 0.72
-        }
+        if (hitWall){ g.vx = 0; g.vy = 0 }
 
         g.sprite.x = nx
         g.sprite.y = ny
@@ -3229,4 +3180,4 @@ class GameScene extends Phaser.Scene {
 })()
 </script>
 </body>
-</html>
+  </html>
