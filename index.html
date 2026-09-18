@@ -1458,6 +1458,59 @@ class GameScene extends Phaser.Scene {
         this._doGrenadeThrow()
       }
     })
+    this.grenadeAimGraphics = this.add.graphics().setDepth(25)
+  }
+
+  updateGrenadeLandingIndicator(){
+    const gr = this.grenadeAimGraphics
+    if (!gr) return
+    gr.clear()
+    if (this.weapon !== 'grenade' || !this.firing || this.local.dead) return
+
+    const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
+    const force = clamp(this.aimForce || CFG.GRENADE_MIN_FORCE, CFG.GRENADE_MIN_FORCE, 1)
+    const speed = CFG.GRENADE_SPEED * force
+    let x = this.local.x + (this.aimVec.x / len) * (CFG.PLAYER_R + 6)
+    let y = this.local.y + (this.aimVec.y / len) * (CFG.PLAYER_R + 6)
+    let vx = (this.aimVec.x / len) * speed
+    let vy = (this.aimVec.y / len) * speed
+    const step = 1 / 30
+    const total = CFG.GRENADE_FUSE / 1000
+    let lastX = x, lastY = y
+
+    for (let t = 0; t < total; t += step){
+      const drag = Math.exp(-CFG.GRENADE_DRAG_K * step)
+      vx *= drag; vy *= drag
+      vy += CFG.GRENADE_GRAVITY * step
+      let nx = x + vx * step, ny = y + vy * step
+
+      for (const r of this.wallRects){
+        if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
+            ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
+          const rr = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
+          if (rr){ nx = rr.x; ny = rr.y }
+          const cx = r.x + r.w/2, cy = r.y + r.h/2
+          const dx = nx - cx, dy = ny - cy
+          if (Math.abs(dx)/(r.w/2 + CFG.GRENADE_R) > Math.abs(dy)/(r.h/2 + CFG.GRENADE_R)) vx *= -CFG.GRENADE_BOUNCE
+          else { vy *= -CFG.GRENADE_BOUNCE; vx *= 0.72 }
+          break
+        }
+      }
+      if (nx <= CFG.GRENADE_R || nx >= CFG.W-CFG.GRENADE_R){
+        nx = clamp(nx, CFG.GRENADE_R, CFG.W-CFG.GRENADE_R); vx *= -CFG.GRENADE_BOUNCE
+      }
+      if (ny <= CFG.GRENADE_R || ny >= CFG.H-CFG.GRENADE_R){
+        ny = clamp(ny, CFG.GRENADE_R, CFG.H-CFG.GRENADE_R); vy *= -CFG.GRENADE_BOUNCE; vx *= 0.72
+      }
+      x = nx; y = ny; lastX = x; lastY = y
+      if (Math.floor(t / step) % 2 === 0){ gr.fillStyle(0xffffff, 0.55); gr.fillCircle(x, y, 3) }
+    }
+
+    gr.lineStyle(3, 0xffd84d, 0.95)
+    gr.strokeCircle(lastX, lastY, 13)
+    gr.lineBetween(lastX-19, lastY, lastX+19, lastY)
+    gr.lineBetween(lastX, lastY-19, lastX, lastY+19)
+    gr.fillStyle(0xffd84d, 0.95); gr.fillCircle(lastX, lastY, 4)
   }
 
   /* 🆕 выполнить бросок гранаты (на отпускании стика) */
@@ -2350,6 +2403,7 @@ class GameScene extends Phaser.Scene {
 
   update(time, delta){
     const dt = Math.min(delta, 50) / 1000
+    this.updateGrenadeLandingIndicator()
 
     if (time - this.lastAcTick > 250){
       const dtAc = (time - this.lastAcTick) / 1000
