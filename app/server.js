@@ -1,941 +1,2283 @@
-// ============================================================
-// server.js — WebSocket relay + MaxAC
-// ============================================================
+// Shoot'n'cats — authoritative game server
+// Node.js + ws
+
 const { WebSocketServer } = require('ws');
-const fs = require('fs');
 
 const port = process.env.PORT || 3000;
-const wss = new WebSocketServer({ port, maxPayload: 8192 });
+const wss = new WebSocketServer({
+  port,
+  maxPayload: 4096
+});
 
-const AC = {
-  MAX_PACKET_BYTES: 8192,
-  MAX_MSG_PER_SEC: 100,
+const CFG = {
+  W: 1800,
+  H: 1200,
+  CELL: 40,
 
-  MAX_ROOMS: 200,
-  MAX_CLIENTS_PER_ROOM: 12,
-  MAX_SEQ_GAP: 500,
+  PLAYER_R: 18,
+  SPEED: 240,
 
-  STRIKE_DECAY_MS: 60000,
-  STRIKE_KICK: 8,
-  STRIKE_SEVERE: 3,
+  BULLET_SPEED: 780,
+  BULLET_R: 5,
+  BULLET_LIFE: 1.4,
+  FIRE_CD: 150,
 
-  BAN_FILE: './bans.json',
-  IP_BAN_MS: 60 * 60 * 1000,
-  MAX_BANS_PER_IP: 3,
+  MAX_HP: 100,
+  DAMAGE: 25,
+  RESPAWN: 2500,
+
+  PICKUP_INTERVAL: 3500,
+  PICKUP_MAX: 6,
+  PICKUP_RADIUS: 24,
+
+  BONUS_DURATION: 20000,
+  BONUS_HP_AMOUNT: 40,
+  BONUS_FIRE_MUL: 0.5,
+
+  BONUS_HOMING_TURN: 0.12,
+  BONUS_HOMING_NOISE: 0.4,
+  BONUS_RICOCHET_MAX: 2,
+
+  BONUS_HOMING_FIRE_CD: 2000,
+  BONUS_SPRAYER_FIRE_CD: 700,
+
+  BONUS_SPRAYER_PELLETS: 7,
+  BONUS_SPRAYER_SPREAD_DEG: 30,
+  BONUS_SPRAYER_DAMAGE_MUL: 0.5,
+
+  DASH_SPEED: 720,
+  DASH_DURATION: 160,
+  DASH_CD: 1400,
+
+  GRENADE_SPEED: 750,
+  GRENADE_R: 10,
+  GRENADE_FUSE: 1500,
+  GRENADE_CD: 1800,
+
+  GRENADE_RADIUS: 140,
+  GRENADE_DAMAGE: 60,
+  GRENADE_SELF_DAMAGE_MUL: 0.5,
+  GRENADE_DRAG_K: 1.2,
+  GRENADE_MIN_FORCE: 0.3,
+
+  STATE_MS: 66
 };
 
+const SPAWNS = [
+  { x: 120, y: 120 },
+  { x: CFG.W - 120, y: 120 },
+  { x: 120, y: CFG.H - 120 },
+  { x: CFG.W - 120, y: CFG.H - 120 },
+  { x: CFG.W / 2, y: 120 },
+  { x: CFG.W / 2, y: CFG.H - 120 }
+];
+
 const rooms = new Map();
-const roomHost = new Map();
-const roomPeers = new Map();
 const clients = new Map();
+const roomMeta = new Map();
 
-const bannedHashes = new Set();
-const ipStrikes = new Map();
-const ipBanList = new Map();
+const MAX_PLAYERS = 12;
+const MAX_MSG_PER_SEC = 100;
+const MAX_ROOMS = 64;
 
-function safeParse(raw) {
-  if (!raw) return null;
 
-  const str = raw.toString();
+// ---------------------------------------------------------
+// UTILS
+// ---------------------------------------------------------
 
-  if (str.length > AC.MAX_PACKET_BYTES) {
-    return null;
+function hashStr(s) {
+  let h = 2166136261 >>> 0;
+
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
 
-  try {
-    return JSON.parse(str);
-  } catch {
-    return null;
-  }
+  return h >>> 0;
 }
 
-function validateVec(v) {
-  return (
-    Array.isArray(v) &&
-    v.length === 2 &&
-    Number.isFinite(v[0]) &&
-    Number.isFinite(v[1]) &&
-    Math.abs(v[0]) <= 1.5 &&
-    Math.abs(v[1]) <= 1.5
+
+function mulberry32(a) {
+  return () => {
+    a |= 0;
+    a = a + 0x6D2B79F5 | 0;
+
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+
+function generateWalls(seed) {
+  const rng = mulberry32(hashStr(seed));
+
+  const cs = CFG.CELL;
+  const cols = Math.floor(CFG.W / cs);
+  const rows = Math.floor(CFG.H / cs);
+
+  const used = new Set();
+  const out = [];
+
+  const push = (c, r) => {
+    const k = c + ',' + r;
+
+    if (used.has(k)) return;
+
+    used.add(k);
+
+    out.push({
+      x: c * cs,
+      y: r * cs,
+      w: cs,
+      h: cs
+    });
+  };
+
+  // Borders
+  for (let c = 0; c < cols; c++) {
+    push(c, 0);
+    push(c, rows - 1);
+  }
+
+  for (let r = 0; r < rows; r++) {
+    push(0, r);
+    push(cols - 1, r);
+  }
+
+  const near = (x, y) => {
+    return SPAWNS.some(
+      s =>
+        Math.abs(s.x - x) < 140 &&
+        Math.abs(s.y - y) < 140
+    );
+  };
+
+  for (let i = 0; i < 60; i++) {
+    const c = 2 + Math.floor(rng() * (cols - 4));
+    const r = 2 + Math.floor(rng() * (rows - 4));
+
+    const len = 1 + Math.floor(rng() * 3);
+    const hor = rng() < 0.5;
+
+    for (let j = 0; j < len; j++) {
+      const cc = hor ? c + j : c;
+      const rr = hor ? r : r + j;
+
+      if (cc >= cols - 1 || rr >= rows - 1)
+        break;
+
+      if (
+        !near(
+          cc * cs + cs / 2,
+          rr * cs + cs / 2
+        )
+      ) {
+        push(cc, rr);
+      }
+    }
+  }
+
+  return out;
+}
+
+
+function clamp(v, a, b) {
+  return Math.max(a, Math.min(b, v));
+}
+
+
+function resolveCircleRect(x, y, r, R) {
+  const cx = clamp(x, R.x, R.x + R.w);
+  const cy = clamp(y, R.y, R.y + R.h);
+
+  const dx = x - cx;
+  const dy = y - cy;
+
+  const d2 = dx * dx + dy * dy;
+
+  if (d2 >= r * r)
+    return null;
+
+  if (d2 > 0) {
+    const d = Math.sqrt(d2);
+    const k = (r - d) / d;
+
+    return {
+      x: x + dx * k,
+      y: y + dy * k
+    };
+  }
+
+  const dl = Math.abs(x - R.x);
+  const dr = Math.abs(R.x + R.w - x);
+  const dt = Math.abs(y - R.y);
+  const db = Math.abs(R.y + R.h - y);
+
+  const m = Math.min(dl, dr, dt, db);
+
+  if (m === dl)
+    return { x: R.x - r, y };
+
+  if (m === dr)
+    return { x: R.x + R.w + r, y };
+
+  if (m === dt)
+    return { x, y: R.y - r };
+
+  return {
+    x,
+    y: R.y + R.h + r
+  };
+}
+
+
+// ---------------------------------------------------------
+// PLAYER
+// ---------------------------------------------------------
+
+function movePlayer(p, dt) {
+  let mx = p.input.m[0] || 0;
+  let my = p.input.m[1] || 0;
+
+  let speed = CFG.SPEED;
+
+  if (p.dashUntil > Date.now()) {
+    mx = p.dashX;
+    my = p.dashY;
+    speed = CFG.DASH_SPEED;
+  }
+
+  p.vx = mx * speed;
+  p.vy = my * speed;
+
+  let x = p.x + p.vx * dt;
+  let y = p.y + p.vy * dt;
+
+  x = clamp(
+    x,
+    CFG.PLAYER_R,
+    CFG.W - CFG.PLAYER_R
+  );
+
+  y = clamp(
+    y,
+    CFG.PLAYER_R,
+    CFG.H - CFG.PLAYER_R
+  );
+
+  for (const r of p.room.walls) {
+    const q = resolveCircleRect(
+      x,
+      y,
+      CFG.PLAYER_R,
+      r
+    );
+
+    if (q) {
+      x = q.x;
+      y = q.y;
+    }
+  }
+
+  p.x = x;
+  p.y = y;
+}
+
+
+function resetBonuses(p) {
+  p.bonuses = {
+    rapidUntil: 0,
+    homingUntil: 0,
+    ricochetUntil: 0,
+    shieldHits: 0,
+    sprayerUntil: 0
+  };
+}
+
+
+function fireBehavior(p, now) {
+  const b = p.bonuses;
+
+  const rapid = b.rapidUntil > now;
+  const homing = b.homingUntil > now;
+  const ric = b.ricochetUntil > now;
+  const spr = b.sprayerUntil > now;
+
+  if (spr) {
+    return {
+      cd: CFG.BONUS_SPRAYER_FIRE_CD,
+      homing: false,
+      ricochet: 0,
+      sprayer: true
+    };
+  }
+
+  let cd = CFG.FIRE_CD;
+
+  if (rapid)
+    cd *= CFG.BONUS_FIRE_MUL;
+
+  if (homing)
+    cd = Math.max(
+      cd,
+      CFG.BONUS_HOMING_FIRE_CD
+    );
+
+  return {
+    cd,
+    homing,
+    ricochet: ric
+      ? CFG.BONUS_RICOCHET_MAX
+      : 0,
+    sprayer: false
+  };
+}
+
+
+// ---------------------------------------------------------
+// PICKUPS
+// ---------------------------------------------------------
+
+function insideWall(room, x, y, r) {
+  return room.walls.some(
+    w =>
+      x > w.x - r &&
+      x < w.x + w.w + r &&
+      y > w.y - r &&
+      y < w.y + w.h + r
   );
 }
 
-function validateInputPayload(d) {
-  if (!d || typeof d !== 'object') return false;
 
-  if (!validateVec(d.m)) return false;
-  if (!validateVec(d.a)) return false;
+function spawnPickup(room) {
+  if (room.pickups.length >= CFG.PICKUP_MAX)
+    return;
 
-  if (d.f !== 0 && d.f !== 1) return false;
+  const weights = {
+    hp: 1.2,
+    rapid: 1,
+    homing: 1,
+    ricochet: 1,
+    shield: 1,
+    sprayer: 1.5
+  };
 
+  const used = new Set(
+    room.pickups.map(p => p.type)
+  );
+
+  const cand = Object.keys(weights)
+    .filter(x => !used.has(x));
+
+  if (!cand.length)
+    return;
+
+  let total = cand.reduce(
+    (s, x) => s + weights[x],
+    0
+  );
+
+  let r = Math.random() * total;
+  let type = cand[0];
+
+  for (const x of cand) {
+    r -= weights[x];
+
+    if (r <= 0) {
+      type = x;
+      break;
+    }
+  }
+
+  let x;
+  let y;
+  let tries = 0;
+
+  do {
+    x = 100 + Math.random() * (CFG.W - 200);
+    y = 100 + Math.random() * (CFG.H - 200);
+
+    tries++;
+  } while (
+    insideWall(room, x, y, 40) &&
+    tries < 40
+  );
+
+  if (tries >= 40)
+    return;
+
+  room.pickups.push({
+    id: 'pk_' + (++room.pickupSeq),
+    type,
+    x,
+    y
+  });
+}
+
+
+function applyPickup(p, type, now) {
+  if (type === 'hp') {
+    p.hp = Math.min(
+      CFG.MAX_HP,
+      p.hp + CFG.BONUS_HP_AMOUNT
+    );
+  }
+
+  else if (type === 'rapid') {
+    p.bonuses.rapidUntil =
+      now + CFG.BONUS_DURATION;
+  }
+
+  else if (type === 'homing') {
+    p.bonuses.homingUntil =
+      now + CFG.BONUS_DURATION;
+  }
+
+  else if (type === 'ricochet') {
+    p.bonuses.ricochetUntil =
+      now + CFG.BONUS_DURATION;
+  }
+
+  else if (type === 'shield') {
+    p.bonuses.shieldHits++;
+  }
+
+  else if (type === 'sprayer') {
+    p.bonuses.sprayerUntil =
+      now + CFG.BONUS_DURATION;
+  }
+}
+
+
+// ---------------------------------------------------------
+// NETWORK
+// ---------------------------------------------------------
+
+function send(ws, obj) {
   if (
-    typeof d.seq !== 'number' ||
-    !Number.isFinite(d.seq)
+    !ws ||
+    ws.readyState !== 1 ||
+    ws.bufferedAmount > 96 * 1024
   ) {
     return false;
   }
 
-  if (d.seq < 0 || d.seq > 1e9) {
+  try {
+    ws.send(
+      typeof obj === 'string'
+        ? obj
+        : JSON.stringify(obj)
+    );
+
+    return true;
+  }
+  catch {
     return false;
   }
-
-  return true;
 }
 
-function loadBans() {
-  try {
-    if (fs.existsSync(AC.BAN_FILE)) {
-      const arr = JSON.parse(
-        fs.readFileSync(AC.BAN_FILE, 'utf8')
-      );
 
-      if (Array.isArray(arr)) {
-        for (const h of arr) {
-          bannedHashes.add(h);
-        }
+function broadcast(room, obj) {
+  const raw =
+    typeof obj === 'string'
+      ? obj
+      : JSON.stringify(obj);
+
+  for (const ws of room.clients) {
+    if (
+      ws.readyState === 1 &&
+      ws.bufferedAmount <= 96 * 1024
+    ) {
+      try {
+        ws.send(raw);
       }
-
-      console.log(
-        `[AC] loaded ${bannedHashes.size} bans`
-      );
+      catch {}
     }
-  } catch (e) {}
+  }
 }
 
-function saveBans() {
-  try {
-    fs.writeFileSync(
-      AC.BAN_FILE,
-      JSON.stringify([...bannedHashes])
-    );
-  } catch {}
+
+// ---------------------------------------------------------
+// STATE
+// ---------------------------------------------------------
+
+function playerPack(room, now) {
+  const p = {};
+
+  for (const [id, v] of room.players) {
+    const b = v.bonuses;
+
+    p[id] = [
+      Math.round(v.x),
+      Math.round(v.y),
+
+      Math.round(v.aimX * 100) / 100,
+      Math.round(v.aimY * 100) / 100,
+
+      Math.round(v.hp),
+
+      v.dead ? 1 : 0,
+
+      [
+        Math.max(
+          0,
+          Math.round(b.rapidUntil - now)
+        ),
+
+        Math.max(
+          0,
+          Math.round(b.homingUntil - now)
+        ),
+
+        Math.max(
+          0,
+          Math.round(b.ricochetUntil - now)
+        ),
+
+        b.shieldHits || 0,
+
+        Math.max(
+          0,
+          Math.round(b.sprayerUntil - now)
+        )
+      ]
+    ];
+  }
+
+  const scores = {};
+  const names = {};
+
+  for (const [id, v] of room.players) {
+    scores[id] = Math.round(v.score || 0);
+    names[id] = v.name || id.slice(0, 6);
+  }
+
+  return {
+    p,
+    scores,
+    names,
+
+    pickups: room.pickups.map(
+      x => [
+        x.id,
+        x.type,
+        Math.round(x.x),
+        Math.round(x.y)
+      ]
+    )
+  };
 }
 
-loadBans();
 
-function ensureClient(ws, ip) {
-  let c = clients.get(ws.peerId);
+// ---------------------------------------------------------
+// BULLETS
+// ---------------------------------------------------------
 
-  if (!c) {
-    c = {
-      peerId: ws.peerId,
-      ws,
-      ip,
+function spawnBullet(room, p, now) {
+  const len =
+    Math.hypot(p.aimX, p.aimY) || 1;
 
-      strikes: 0,
-      lastStrike: 0,
+  const ax = p.aimX / len;
+  const ay = p.aimY / len;
 
-      msgTimes: [],
+  const fb = fireBehavior(p, now);
 
-      seq: -1,
+  const count = fb.sprayer
+    ? CFG.BONUS_SPRAYER_PELLETS
+    : 1;
 
-      pubHash: null,
-      verified: false,
+  const base = Math.atan2(ay, ax);
 
-      joinedAt: Date.now(),
-      room: null,
+  const spread =
+    CFG.BONUS_SPRAYER_SPREAD_DEG *
+    Math.PI / 180;
+
+  for (let i = 0; i < count; i++) {
+    let ang = base;
+
+    if (fb.sprayer) {
+      const t =
+        count === 1
+          ? 0.5
+          : i / (count - 1);
+
+      ang =
+        base -
+        spread / 2 +
+        spread * t +
+        (Math.random() - 0.5) * 0.04;
+    }
+
+    const vx =
+      Math.cos(ang) *
+      CFG.BULLET_SPEED;
+
+    const vy =
+      Math.sin(ang) *
+      CFG.BULLET_SPEED;
+
+    const id =
+      p.id +
+      '-' +
+      (++p.shotSeq);
+
+    const b = {
+      id,
+
+      x:
+        p.x +
+        Math.cos(ang) *
+        (CFG.PLAYER_R + 6),
+
+      y:
+        p.y +
+        Math.sin(ang) *
+        (CFG.PLAYER_R + 6),
+
+      vx,
+      vy,
+
+      owner: p.id,
+      born: now,
+
+      homing: fb.homing,
+      bouncesLeft: fb.ricochet,
+
+      damage:
+        fb.sprayer
+          ? CFG.DAMAGE *
+            CFG.BONUS_SPRAYER_DAMAGE_MUL
+          : CFG.DAMAGE,
+
+      sprayer: fb.sprayer
     };
 
-    clients.set(ws.peerId, c);
-  }
+    room.bullets.push(b);
 
-  return c;
+    broadcast(room, {
+      a: 'bl',
+
+      d: {
+        id: b.id,
+        x: b.x,
+        y: b.y,
+        vx: b.vx,
+        vy: b.vy,
+        owner: b.owner,
+        homing: b.homing,
+        ricochet: b.bouncesLeft,
+        sprayer: b.sprayer
+      }
+    });
+  }
 }
 
-function decay(c) {
-  const now = Date.now();
 
-  if (
-    c.strikes > 0 &&
-    now - c.lastStrike > AC.STRIKE_DECAY_MS
-  ) {
-    c.strikes--;
-    c.lastStrike = now;
-  }
-}
+// ---------------------------------------------------------
+// GRENADES
+// ---------------------------------------------------------
 
-function strike(c, reason, w = 1) {
-  c.strikes += w;
-  c.lastStrike = Date.now();
+function spawnGrenade(room, p, now) {
+  const len =
+    Math.hypot(p.aimX, p.aimY) || 1;
 
-  console.warn(
-    `[AC] strike ${c.peerId?.slice(0, 8)} "${reason}" (+${w}) = ${c.strikes}`
+  const ax = p.aimX / len;
+  const ay = p.aimY / len;
+
+  const force = clamp(
+    p.input.af ?? 1,
+    CFG.GRENADE_MIN_FORCE,
+    1
   );
 
-  if (c.strikes >= AC.STRIKE_KICK) {
-    banClient(c, `strikes: ${reason}`);
-    return false;
-  }
+  const id =
+    p.id +
+    '-g' +
+    (++p.grenadeSeq);
 
-  return true;
+  const b = {
+    id,
+
+    x:
+      p.x +
+      ax *
+      (CFG.PLAYER_R + 6),
+
+    y:
+      p.y +
+      ay *
+      (CFG.PLAYER_R + 6),
+
+    vx:
+      ax *
+      CFG.GRENADE_SPEED *
+      force,
+
+    vy:
+      ay *
+      CFG.GRENADE_SPEED *
+      force,
+
+    owner: p.id,
+    born: now,
+
+    explodeAt:
+      now + CFG.GRENADE_FUSE,
+
+    isGrenade: true
+  };
+
+  room.bullets.push(b);
+
+  broadcast(room, {
+    a: 'bl',
+
+    d: {
+      id: b.id,
+      x: b.x,
+      y: b.y,
+      vx: b.vx,
+      vy: b.vy,
+      owner: b.owner,
+      grenade: true
+    }
+  });
 }
 
-function banClient(c, reason) {
-  if (c.pubHash) {
-    bannedHashes.add(c.pubHash);
-    saveBans();
-  }
 
-  console.warn(
-    `[AC] BAN peer=${c.peerId?.slice(0, 8)} reason="${reason}"`
-  );
+function explode(room, b, now) {
+  const hits = [];
 
-  try {
-    c.ws.send(
-      JSON.stringify({
-        type: 'banned',
-        reason,
-      })
+  for (const t of room.players.values()) {
+    if (t.dead)
+      continue;
+
+    const dx = t.x - b.x;
+    const dy = t.y - b.y;
+
+    const d = Math.hypot(dx, dy);
+
+    if (d > CFG.GRENADE_RADIUS)
+      continue;
+
+    let dmg = Math.round(
+      CFG.GRENADE_DAMAGE *
+      (1 - d / CFG.GRENADE_RADIUS)
     );
-  } catch {}
 
-  try {
-    c.ws.close(1008, 'banned');
-  } catch {}
+    if (t.id === b.owner) {
+      dmg = Math.round(
+        dmg *
+        CFG.GRENADE_SELF_DAMAGE_MUL
+      );
+    }
+
+    if (dmg < 1)
+      continue;
+
+    let blocked = false;
+
+    if (t.bonuses.shieldHits > 0) {
+      t.bonuses.shieldHits--;
+      blocked = true;
+    }
+    else {
+      t.hp -= dmg;
+    }
+
+    let killed = false;
+
+    if (
+      !blocked &&
+      t.hp <= 0
+    ) {
+      t.hp = 0;
+      t.dead = true;
+
+      t.respawnAt =
+        now + CFG.RESPAWN;
+
+      t.dashUntil = 0;
+
+      resetBonuses(t);
+
+      killed = true;
+
+      const s =
+        room.players.get(b.owner);
+
+      if (s)
+        s.score++;
+    }
+
+    hits.push({
+      tid: t.id,
+      hp: t.hp,
+      dead: t.dead ? 1 : 0,
+      blocked,
+      killed,
+      dmg
+    });
+  }
+
+  broadcast(room, {
+    a: 'gex',
+
+    d: {
+      id: b.id,
+      owner: b.owner,
+      x: Math.round(b.x),
+      y: Math.round(b.y),
+      r: CFG.GRENADE_RADIUS,
+      hits
+    }
+  });
 }
 
-function checkRate(c) {
-  const now = Date.now();
 
-  c.msgTimes.push(now);
+// ---------------------------------------------------------
+// GAME LOOP
+// ---------------------------------------------------------
 
-  while (
-    c.msgTimes.length &&
-    now - c.msgTimes[0] > 1000
-  ) {
-    c.msgTimes.shift();
-  }
+function tickRoom(room, now, dt) {
 
-  if (c.msgTimes.length > AC.MAX_MSG_PER_SEC) {
-    return strike(
-      c,
-      'rate',
-      AC.STRIKE_SEVERE
-    );
-  }
+  // PLAYERS
+  for (const p of room.players.values()) {
 
-  return true;
-}
+    // Respawn
+    if (p.dead) {
+      if (now >= p.respawnAt) {
+        const s =
+          SPAWNS[
+            p.spawnIndex %
+            SPAWNS.length
+          ];
 
-function cleanupClient(ws, reason) {
-  const c = clients.get(ws.peerId);
+        p.x = s.x;
+        p.y = s.y;
 
-  if (!c) return;
+        p.hp = CFG.MAX_HP;
+        p.dead = false;
 
-  const roomId = c.room;
+        p.vx = 0;
+        p.vy = 0;
 
-  if (!roomId) {
-    clients.delete(c.peerId);
-    return;
-  }
+        resetBonuses(p);
+      }
 
-  const room = rooms.get(roomId);
+      continue;
+    }
 
-  if (!room) {
-    clients.delete(c.peerId);
-    return;
-  }
 
-  room.delete(ws);
+    // Movement
+    movePlayer(p, dt);
 
-  const peerMap = roomPeers.get(roomId);
 
-  if (peerMap) {
-    peerMap.delete(c.peerId);
-  }
+    // Aim
+    p.aimX =
+      p.input.a[0] || 1;
 
-  for (const peer of room) {
-    if (peer.readyState === 1) {
-      try {
-        peer.send(
-          JSON.stringify({
-            type: 'peer-leave',
-            peerId: c.peerId,
-          })
+    p.aimY =
+      p.input.a[1] || 0;
+
+
+    // DASH
+    if (
+      p.input.dseq >
+      p.lastDseq
+    ) {
+      p.lastDseq =
+        p.input.dseq;
+
+      let dx = p.input.m[0];
+      let dy = p.input.m[1];
+
+      if (
+        Math.hypot(dx, dy) < 0.2
+      ) {
+        dx = p.aimX;
+        dy = p.aimY;
+      }
+
+      const l =
+        Math.hypot(dx, dy) || 1;
+
+      p.dashX = dx / l;
+      p.dashY = dy / l;
+
+      p.dashUntil =
+        now + CFG.DASH_DURATION;
+    }
+
+
+    // GRENADE
+    if (
+      p.input.tseq >
+      p.lastTseq
+    ) {
+      p.lastTseq =
+        p.input.tseq;
+
+      if (
+        now - p.lastThrow >=
+        CFG.GRENADE_CD * 0.85
+      ) {
+        p.lastThrow = now;
+
+        spawnGrenade(
+          room,
+          p,
+          now
         );
-      } catch {}
+      }
+    }
+
+
+    // FIRE
+    if (
+      p.input.w !== 1 &&
+      p.input.f
+    ) {
+      const fb =
+        fireBehavior(p, now);
+
+      if (
+        now - p.fireAt >=
+        fb.cd
+      ) {
+        p.fireAt = now;
+
+        spawnBullet(
+          room,
+          p,
+          now
+        );
+      }
+    }
+
+
+    // PICKUPS
+    for (
+      let i = room.pickups.length - 1;
+      i >= 0;
+      i--
+    ) {
+      const k =
+        room.pickups[i];
+
+      const dx =
+        p.x - k.x;
+
+      const dy =
+        p.y - k.y;
+
+      const rr =
+        CFG.PLAYER_R +
+        CFG.PICKUP_RADIUS;
+
+      if (
+        dx * dx +
+        dy * dy <
+        rr * rr
+      ) {
+        applyPickup(
+          p,
+          k.type,
+          now
+        );
+
+        room.pickups.splice(
+          i,
+          1
+        );
+      }
     }
   }
 
-  if (roomHost.get(roomId) === c.peerId) {
-    const remaining = [...room];
 
-    if (remaining.length) {
-      const newHost = remaining[0].peerId;
+  // PICKUP SPAWN
+  if (
+    now - room.lastPickup >
+    CFG.PICKUP_INTERVAL
+  ) {
+    room.lastPickup = now;
+    spawnPickup(room);
+  }
 
-      roomHost.set(roomId, newHost);
 
-      for (const p of remaining) {
-        if (p.readyState === 1) {
-          try {
-            p.send(
-              JSON.stringify({
-                type: 'host-change',
-                host: newHost,
-              })
+  // BULLETS + GRENADES
+  for (
+    let i = room.bullets.length - 1;
+    i >= 0;
+    i--
+  ) {
+
+    const b =
+      room.bullets[i];
+
+
+    // GRENADE
+    if (b.isGrenade) {
+
+      const drag =
+        Math.exp(
+          -CFG.GRENADE_DRAG_K *
+          dt
+        );
+
+      b.vx *= drag;
+      b.vy *= drag;
+
+      let nx =
+        b.x +
+        b.vx * dt;
+
+      let ny =
+        b.y +
+        b.vy * dt;
+
+      let hit = false;
+
+      for (const r of room.walls) {
+
+        if (
+          nx >
+            r.x -
+            CFG.GRENADE_R &&
+
+          nx <
+            r.x +
+            r.w +
+            CFG.GRENADE_R &&
+
+          ny >
+            r.y -
+            CFG.GRENADE_R &&
+
+          ny <
+            r.y +
+            r.h +
+            CFG.GRENADE_R
+        ) {
+          hit = true;
+
+          const q =
+            resolveCircleRect(
+              nx,
+              ny,
+              CFG.GRENADE_R,
+              r
             );
-          } catch {}
+
+          if (q) {
+            nx = q.x;
+            ny = q.y;
+          }
+
+          break;
         }
       }
-    } else {
-      roomHost.delete(roomId);
+
+      if (hit) {
+        b.vx = 0;
+        b.vy = 0;
+      }
+
+      b.x = nx;
+      b.y = ny;
+
+
+      // EXPLOSION
+      if (
+        now >= b.explodeAt
+      ) {
+        explode(
+          room,
+          b,
+          now
+        );
+
+        room.bullets.splice(
+          i,
+          1
+        );
+      }
+
+      continue;
+    }
+
+
+    // HOMING
+    if (b.homing) {
+
+      let near = null;
+      let nd = Infinity;
+
+      for (
+        const t of room.players.values()
+      ) {
+        if (
+          t.id === b.owner ||
+          t.dead
+        )
+          continue;
+
+        const d =
+          (t.x - b.x) ** 2 +
+          (t.y - b.y) ** 2;
+
+        if (d < nd) {
+          nd = d;
+          near = t;
+        }
+      }
+
+      if (near) {
+
+        const target =
+          Math.atan2(
+            near.y - b.y,
+            near.x - b.x
+          );
+
+        const cur =
+          Math.atan2(
+            b.vy,
+            b.vx
+          );
+
+        const want =
+          target +
+          (Math.random() - 0.5) *
+          CFG.BONUS_HOMING_NOISE;
+
+        let diff =
+          want - cur;
+
+        while (diff > Math.PI)
+          diff -= Math.PI * 2;
+
+        while (diff < -Math.PI)
+          diff += Math.PI * 2;
+
+        const turn =
+          clamp(
+            diff,
+            -CFG.BONUS_HOMING_TURN,
+            CFG.BONUS_HOMING_TURN
+          );
+
+        const sp =
+          Math.hypot(
+            b.vx,
+            b.vy
+          );
+
+        const a =
+          cur + turn;
+
+        b.vx =
+          Math.cos(a) * sp;
+
+        b.vy =
+          Math.sin(a) * sp;
+      }
+    }
+
+
+    // BULLET MOVEMENT
+    let nx =
+      b.x +
+      b.vx * dt;
+
+    let ny =
+      b.y +
+      b.vy * dt;
+
+    let hit = null;
+
+
+    // WALL COLLISION
+    for (const r of room.walls) {
+
+      if (
+        nx >
+          r.x -
+          CFG.BULLET_R &&
+
+        nx <
+          r.x +
+          r.w +
+          CFG.BULLET_R &&
+
+        ny >
+          r.y -
+          CFG.BULLET_R &&
+
+        ny <
+          r.y +
+          r.h +
+          CFG.BULLET_R
+      ) {
+        hit = r;
+        break;
+      }
+    }
+
+
+    // RICOCHET
+    if (hit) {
+
+      if (b.bouncesLeft > 0) {
+
+        b.bouncesLeft--;
+
+        const cx =
+          hit.x +
+          hit.w / 2;
+
+        const cy =
+          hit.y +
+          hit.h / 2;
+
+        const dx =
+          nx - cx;
+
+        const dy =
+          ny - cy;
+
+        const ow =
+          hit.w / 2 +
+          CFG.BULLET_R;
+
+        const oh =
+          hit.h / 2 +
+          CFG.BULLET_R;
+
+        const ox =
+          ow - Math.abs(dx);
+
+        const oy =
+          oh - Math.abs(dy);
+
+        if (ox < oy) {
+          b.vx = -b.vx;
+
+          nx =
+            b.x +
+            Math.sign(dx || 1) *
+            ox;
+        }
+        else {
+          b.vy = -b.vy;
+
+          ny =
+            b.y +
+            Math.sign(dy || 1) *
+            oy;
+        }
+      }
+
+      else {
+        room.bullets.splice(
+          i,
+          1
+        );
+
+        continue;
+      }
+    }
+
+
+    b.x = nx;
+    b.y = ny;
+
+
+    // BULLET LIFE
+    if (
+      now - b.born >
+      CFG.BULLET_LIFE * 1000
+    ) {
+      room.bullets.splice(
+        i,
+        1
+      );
+
+      continue;
+    }
+
+
+    // PLAYER HIT
+    let hitPlayer = false;
+
+    for (
+      const t of room.players.values()
+    ) {
+
+      if (
+        t.id === b.owner ||
+        t.dead
+      )
+        continue;
+
+      const dx =
+        t.x - b.x;
+
+      const dy =
+        t.y - b.y;
+
+      const rr =
+        CFG.PLAYER_R +
+        CFG.BULLET_R;
+
+      if (
+        dx * dx +
+        dy * dy <
+        rr * rr
+      ) {
+
+        let blocked = false;
+
+        if (
+          t.bonuses.shieldHits > 0
+        ) {
+          t.bonuses.shieldHits--;
+          blocked = true;
+        }
+        else {
+          t.hp -= b.damage;
+        }
+
+        let killed = false;
+
+        if (
+          !blocked &&
+          t.hp <= 0
+        ) {
+          t.hp = 0;
+
+          t.dead = true;
+
+          t.respawnAt =
+            now +
+            CFG.RESPAWN;
+
+          t.dashUntil = 0;
+
+          resetBonuses(t);
+
+          killed = true;
+
+          const s =
+            room.players.get(
+              b.owner
+            );
+
+          if (s)
+            s.score++;
+        }
+
+        broadcast(room, {
+          a: 'hit',
+
+          d: {
+            bid: b.id,
+            target: t.id,
+            by: b.owner,
+            hp: t.hp,
+            dead: t.dead,
+            killed,
+            blocked,
+            sprayer: !!b.sprayer
+          }
+        });
+
+        room.bullets.splice(
+          i,
+          1
+        );
+
+        hitPlayer = true;
+
+        break;
+      }
+    }
+
+    if (hitPlayer)
+      continue;
+  }
+
+
+  // STATE SYNC
+  if (
+    now - room.lastState >=
+    CFG.STATE_MS
+  ) {
+    room.lastState = now;
+
+    broadcast(room, {
+      a: 'st',
+      d: playerPack(
+        room,
+        now
+      )
+    });
+  }
+}
+
+
+// ---------------------------------------------------------
+// PLAYER CREATION
+// ---------------------------------------------------------
+
+function createPlayer(
+  room,
+  id,
+  ws
+) {
+  const n =
+    room.players.size;
+
+  const s =
+    SPAWNS[
+      n % SPAWNS.length
+    ];
+
+  const p = {
+    id,
+    ws,
+    room,
+
+    x: s.x,
+    y: s.y,
+
+    vx: 0,
+    vy: 0,
+
+    aimX: 1,
+    aimY: 0,
+
+    hp: CFG.MAX_HP,
+    dead: false,
+
+    score: 0,
+
+    spawnIndex: n,
+
+    name: id.slice(0, 6),
+
+    input: {
+      m: [0, 0],
+      a: [1, 0],
+      f: 0,
+      w: 0,
+      af: 1,
+      dseq: 0,
+      tseq: 0
+    },
+
+    dseq: 0,
+    lastDseq: 0,
+    lastTseq: 0,
+
+    lastThrow: 0,
+    fireAt: 0,
+
+    shotSeq: 0,
+    grenadeSeq: 0,
+
+    dashUntil: 0,
+
+    dashX: 1,
+    dashY: 0,
+
+    respawnAt: 0
+  };
+
+  resetBonuses(p);
+
+  room.players.set(
+    id,
+    p
+  );
+
+  return p;
+}
+
+
+// ---------------------------------------------------------
+// LEAVE
+// ---------------------------------------------------------
+
+function leave(ws) {
+  const c =
+    clients.get(
+      ws.peerId
+    );
+
+  if (!c)
+    return;
+
+  const room = c.room;
+
+  if (room) {
+
+    room.players.delete(
+      ws.peerId
+    );
+
+    room.clients.delete(
+      ws
+    );
+
+    broadcast(room, {
+      type: 'peer-leave',
+      peerId: ws.peerId
+    });
+
+    if (
+      room.clients.size === 0
+    ) {
+      rooms.delete(room.id);
+      roomMeta.delete(room.id);
     }
   }
 
-  if (room.size === 0) {
-    rooms.delete(roomId);
-    roomPeers.delete(roomId);
-  }
+  broadcastLobbyList();
 
-  clients.delete(c.peerId);
-
-  console.log(
-    `[S] - ${c.peerId.slice(0, 8)} (${reason})`
+  clients.delete(
+    ws.peerId
   );
 }
 
-function sendJSON(ws, obj) {
-  if (!ws || ws.readyState !== 1) {
-    return false;
-  }
 
-  // Не даём медленному клиенту
-  // накапливать огромную очередь.
-  if (ws.bufferedAmount > 96 * 1024) {
-    return false;
-  }
+// ---------------------------------------------------------
+// LOBBIES
+// ---------------------------------------------------------
 
-  try {
-    ws.send(obj);
-    return true;
-  } catch {
-    return false;
-  }
+function cleanLobbyName(v) {
+  return String(v || '')
+    .replace(/[<>]/g, '')
+    .trim()
+    .slice(0, 24);
 }
 
-function broadcastRoom(
-  room,
-  payloadObj,
-  exceptWs
-) {
+
+function makeRoomId(name) {
+  const base =
+    cleanLobbyName(name)
+      .toLowerCase()
+      .replace(
+        /[^a-z0-9а-яё_-]+/gi,
+        '-'
+      )
+      .replace(
+        /^-+|-+$/g,
+        ''
+      )
+      .slice(0, 18) ||
+    'room';
+
+  let id = base;
+  let n = 2;
+
+  while (
+    rooms.has(id) ||
+    roomMeta.has(id)
+  ) {
+    id =
+      base +
+      '-' +
+      n++;
+
+    if (n > 9999) {
+      id =
+        'room-' +
+        Math.random()
+          .toString(36)
+          .slice(2, 8);
+    }
+  }
+
+  return id;
+}
+
+
+function lobbyList() {
+  const out = [];
+
+  for (
+    const [id, meta]
+    of roomMeta
+  ) {
+    const room =
+      rooms.get(id);
+
+    const players =
+      room
+        ? room.clients.size
+        : 0;
+
+    if (players <= 0)
+      continue;
+
+    out.push({
+      id,
+      name:
+        meta.name || id,
+
+      private:
+        !!meta.private,
+
+      players,
+
+      maxPlayers:
+        MAX_PLAYERS
+    });
+  }
+
+  out.sort(
+    (a, b) =>
+      a.name.localeCompare(
+        b.name
+      )
+  );
+
+  return out.slice(
+    0,
+    MAX_ROOMS
+  );
+}
+
+
+function sendLobbyList(ws) {
+  send(ws, {
+    type: 'lobbies',
+    lobbies: lobbyList()
+  });
+}
+
+
+function broadcastLobbyList() {
   const raw =
-    typeof payloadObj === 'string'
-      ? payloadObj
-      : JSON.stringify(payloadObj);
+    JSON.stringify({
+      type: 'lobbies',
+      lobbies: lobbyList()
+    });
 
-  for (const peer of room) {
+  for (
+    const ws of wss.clients
+  ) {
     if (
-      peer === exceptWs ||
-      peer.readyState !== 1
+      ws.readyState === 1 &&
+      ws.bufferedAmount < 64 * 1024
     ) {
-      continue;
+      try {
+        ws.send(raw);
+      }
+      catch {}
     }
-
-    if (peer.bufferedAmount > 96 * 1024) {
-      continue;
-    }
-
-    try {
-      peer.send(raw);
-    } catch {}
   }
 }
 
-wss.on('connection', (ws, req) => {
-  const ip = (
-    req.headers['x-forwarded-for'] ||
-    req.socket.remoteAddress ||
-    'unknown'
-  )
-    .split(',')[0]
-    .trim();
 
-  // Минимизация задержки TCP.
-  if (ws._socket) {
-    if (ws._socket.setNoDelay) {
-      ws._socket.setNoDelay(true);
+function ensureRoom(
+  roomId,
+  meta = {
+    name: roomId,
+    private: false,
+    password: ''
+  }
+) {
+  let room =
+    rooms.get(roomId);
+
+  if (!room) {
+    room = {
+      id: roomId,
+
+      clients: new Set(),
+
+      players: new Map(),
+
+      bullets: [],
+
+      pickups: [],
+
+      pickupSeq: 0,
+
+      walls:
+        generateWalls(roomId),
+
+      lastPickup:
+        Date.now(),
+
+      lastState: 0,
+
+      lastTick:
+        Date.now()
+    };
+
+    rooms.set(
+      roomId,
+      room
+    );
+  }
+
+  if (
+    !roomMeta.has(roomId)
+  ) {
+    roomMeta.set(
+      roomId,
+      meta
+    );
+  }
+
+  return room;
+}
+
+
+// ---------------------------------------------------------
+// WEBSOCKET
+// ---------------------------------------------------------
+
+wss.on(
+  'connection',
+  (ws, req) => {
+
+    if (
+      ws._socket?.setNoDelay
+    ) {
+      ws._socket.setNoDelay(
+        true
+      );
     }
 
-    if (ws._socket.setKeepAlive) {
+    if (
+      ws._socket?.setKeepAlive
+    ) {
       ws._socket.setKeepAlive(
         true,
         15000
       );
     }
-  }
 
-  const banUntil = ipBanList.get(ip);
+    ws.peerId =
+      'peer_' +
+      Math.random()
+        .toString(36)
+        .slice(2, 10);
 
-  if (
-    banUntil &&
-    banUntil > Date.now()
-  ) {
-    try {
-      ws.close(1008, 'ip banned');
-    } catch {}
-
-    return;
-  }
-
-  ws.peerId =
-    'peer_' +
-    Math.random()
-      .toString(36)
-      .slice(2, 10);
-
-  ws.isAlive = true;
-
-  const c = ensureClient(ws, ip);
-
-  console.log(
-    `[S] + ${c.peerId.slice(0, 8)} from ${ip}`
-  );
-
-  ws.on('message', raw => {
-    const msg = safeParse(raw);
-
-    if (!msg) {
-      strike(
-        c,
-        'bad packet',
-        AC.STRIKE_SEVERE
-      );
-      return;
-    }
-
-    if (!checkRate(c)) {
-      return;
-    }
-
-    decay(c);
-
-    // ========================================================
-    // JOIN
-    // ========================================================
-
-    if (msg.type === 'join') {
-      if (c.room) {
-        strike(c, 'double join');
-        return;
-      }
-
-      const roomId = String(
-        msg.room || ''
-      ).slice(0, 32);
-
-      if (!roomId) {
-        strike(c, 'no room');
-        return;
-      }
-
-      if (!rooms.has(roomId)) {
-        rooms.set(
-          roomId,
-          new Set()
-        );
-      }
-
-      const room = rooms.get(roomId);
-
-      if (
-        room.size >=
-        AC.MAX_CLIENTS_PER_ROOM
-      ) {
-        try {
-          ws.send(
-            JSON.stringify({
-              type: 'error',
-              msg: 'room full',
-            })
-          );
-        } catch {}
-
-        try {
-          ws.close(
-            1008,
-            'room full'
-          );
-        } catch {}
-
-        return;
-      }
-
-      c.room = roomId;
-      ws.roomId = roomId;
-
-      room.add(ws);
-
-      let peerMap =
-        roomPeers.get(roomId);
-
-      if (!peerMap) {
-        peerMap = new Map();
-        roomPeers.set(
-          roomId,
-          peerMap
-        );
-      }
-
-      peerMap.set(
-        c.peerId,
-        ws
-      );
-
-      if (!roomHost.has(roomId)) {
-        roomHost.set(
-          roomId,
-          c.peerId
-        );
-      }
-
-      const existingPeers =
-        [...room]
-          .map(p => p.peerId)
-          .filter(
-            id =>
-              id &&
-              id !== c.peerId
-          );
-
-      try {
-        ws.send(
-          JSON.stringify({
-            type: 'welcome',
-            peerId: c.peerId,
-            peers: existingPeers,
-            host: roomHost.get(roomId),
-          })
-        );
-      } catch {}
-
-      for (const peer of room) {
-        if (
-          peer !== ws &&
-          peer.readyState === 1
-        ) {
-          try {
-            peer.send(
-              JSON.stringify({
-                type: 'peer-join',
-                peerId: c.peerId,
-              })
-            );
-          } catch {}
-        }
-      }
-
-      console.log(
-        `[Room ${roomId}] + ${c.peerId.slice(0, 8)} total=${room.size}`
-      );
-
-      return;
-    }
-
-    // ========================================================
-    // MESSAGE BEFORE JOIN
-    // ========================================================
-
-    if (!c.room) {
-      strike(
-        c,
-        'msg before join',
-        AC.STRIKE_SEVERE
-      );
-      return;
-    }
-
-    // ========================================================
-    // ID / PUBLIC HASH
-    // ========================================================
-
-    if (
-      msg.a === 'id' &&
-      msg.d &&
-      msg.d.pubHash
-    ) {
-      const hash = String(
-        msg.d.pubHash
-      ).slice(0, 64);
-
-      if (bannedHashes.has(hash)) {
-        banClient(
-          c,
-          'persistent ban'
-        );
-        return;
-      }
-
-      c.pubHash = hash;
-    }
-
-    // ========================================================
-    // INPUT
-    // ========================================================
-
-    if (
-      msg.a === 'in' &&
-      msg.d
-    ) {
-      const d = msg.d;
-
-      if (!validateInputPayload(d)) {
-        strike(
-          c,
-          'bad input',
-          AC.STRIKE_SEVERE
-        );
-        return;
-      }
-
-      if (d.seq <= c.seq) {
-        strike(
-          c,
-          'replay',
-          AC.STRIKE_SEVERE
-        );
-        return;
-      }
-
-      if (
-        c.seq >= 0 &&
-        d.seq - c.seq >
-          AC.MAX_SEQ_GAP
-      ) {
-        strike(
-          c,
-          'seq gap'
-        );
-        return;
-      }
-
-      c.seq = d.seq;
-    }
-
-    // ========================================================
-    // HOST-ONLY MESSAGES
-    // ========================================================
-
-    if (
-      msg.a === 'st' ||
-      msg.a === 'bl' ||
-      msg.a === 'hit' ||
-      msg.a === 'pk'
-    ) {
-      const hostId =
-        roomHost.get(c.room);
-
-      if (
-        hostId !== c.peerId
-      ) {
-        strike(
-          c,
-          `${msg.a} from non-host`,
-          AC.STRIKE_SEVERE
-        );
-        return;
-      }
-    }
-
-    // ========================================================
-    // BAN
-    // ========================================================
-
-    if (msg.a === 'ban') {
-      const hostId =
-        roomHost.get(c.room);
-
-      if (
-        hostId !== c.peerId
-      ) {
-        strike(
-          c,
-          'ban from non-host',
-          AC.STRIKE_SEVERE
-        );
-        return;
-      }
-
-      const target =
-        msg.d && msg.d.id;
-
-      if (
-        target &&
-        target !== c.peerId
-      ) {
-        const tc =
-          clients.get(target);
-
-        if (tc) {
-          if (msg.d.pubHash) {
-            bannedHashes.add(
-              msg.d.pubHash
-            );
-
-            saveBans();
-          }
-
-          try {
-            tc.ws.send(
-              JSON.stringify({
-                type: 'banned',
-                reason:
-                  msg.d.reason ||
-                  'banned',
-              })
-            );
-          } catch {}
-
-          try {
-            tc.ws.close(
-              1008,
-              'banned'
-            );
-          } catch {}
-        }
-      }
-    }
-
-    const room =
-      rooms.get(c.room);
-
-    if (!room) {
-      return;
-    }
-
-    // ========================================================
-    // DIRECT MESSAGE
-    // ========================================================
-
-    if (msg.to) {
-      const peerMap =
-        roomPeers.get(c.room);
-
-      const target =
-        peerMap &&
-        peerMap.get(
-          String(msg.to)
-        );
-
-      if (
-        target &&
-        target.readyState === 1
-      ) {
-        sendJSON(
-          target,
-          JSON.stringify({
-            ...msg.data,
-            from: c.peerId,
-          })
-        );
-      }
-
-      return;
-    }
-
-    // ========================================================
-    // BROADCAST
-    // ========================================================
-
-    if (msg.data) {
-      // JSON создаётся ОДИН раз,
-      // а не отдельно для каждого игрока.
-      const payload = {
-        ...msg.data,
-        from: c.peerId,
-      };
-
-      const raw =
-        JSON.stringify(payload);
-
-      for (const peer of room) {
-        if (
-          peer === ws ||
-          peer.readyState !== 1
-        ) {
-          continue;
-        }
-
-        // Не отправляем собственную пулю
-        // обратно её владельцу.
-        if (
-          msg.data.a === 'bl' &&
-          msg.data.d &&
-          msg.data.d.owner ===
-            peer.peerId
-        ) {
-          continue;
-        }
-
-        // Медленный клиент не должен
-        // тормозить остальных.
-        if (
-          peer.bufferedAmount >
-          96 * 1024
-        ) {
-          continue;
-        }
-
-        try {
-          peer.send(raw);
-        } catch {}
-      }
-    }
-  });
-
-  ws.on('close', () => {
-    cleanupClient(
-      ws,
-      'close'
-    );
-  });
-
-  ws.on('error', err => {
-    console.error(
-      `[S] err:`,
-      err.message
-    );
-  });
-
-  ws.on('pong', () => {
     ws.isAlive = true;
-  });
-});
 
-// ============================================================
-// WEBSOCKET HEARTBEAT
-// ============================================================
+    const c = {
+      ws,
+      peerId: ws.peerId,
+      room: null,
+      times: []
+    };
 
-setInterval(() => {
-  wss.clients.forEach(ws => {
-    if (ws.isAlive === false) {
-      try {
-        ws.terminate();
-      } catch {}
-
-      return;
-    }
-
-    ws.isAlive = false;
-
-    try {
-      ws.ping();
-    } catch {}
-  });
-}, 10000);
-
-// ============================================================
-// CLEANUP
-// ============================================================
-
-setInterval(() => {
-  const activeIds =
-    new Set(
-      [...wss.clients]
-        .map(ws => ws.peerId)
+    clients.set(
+      ws.peerId,
+      c
     );
 
-  for (
-    const [peerId, c]
-    of clients
-  ) {
-    if (
-      !activeIds.has(peerId)
-    ) {
-      const roomId = c.room;
+    ws.on(
+      'pong',
+      () => {
+        ws.isAlive = true;
+      }
+    );
 
-      if (roomId) {
-        const room =
-          rooms.get(roomId);
 
-        if (room) {
+    ws.on(
+      'message',
+      raw => {
+
+        if (
+          raw.length > 4096
+        )
+          return;
+
+        const now =
+          Date.now();
+
+        c.times.push(now);
+
+        while (
+          c.times.length &&
+          now - c.times[0] > 1000
+        ) {
+          c.times.shift();
+        }
+
+        if (
+          c.times.length >
+          MAX_MSG_PER_SEC
+        )
+          return;
+
+        let msg;
+
+        try {
+          msg =
+            JSON.parse(raw);
+        }
+        catch {
+          return;
+        }
+
+
+        // LIST LOBBIES
+        if (
+          msg.type === 'list'
+        ) {
+          sendLobbyList(ws);
+          return;
+        }
+
+
+        // CREATE LOBBY
+        if (
+          msg.type === 'create'
+        ) {
+
+          const name =
+            cleanLobbyName(
+              msg.name
+            );
+
+          if (!name) {
+            send(ws, {
+              type: 'error',
+              msg:
+                'lobby name required'
+            });
+
+            return;
+          }
+
+          const priv =
+            !!msg.private;
+
+          const password =
+            String(
+              msg.password || ''
+            ).slice(0, 32);
+
+          if (
+            priv &&
+            !password
+          ) {
+            send(ws, {
+              type: 'error',
+              msg:
+                'password required'
+            });
+
+            return;
+          }
+
+          const id =
+            makeRoomId(name);
+
+          ensureRoom(
+            id,
+            {
+              name,
+              private: priv,
+              password
+            }
+          );
+
+          send(ws, {
+            type: 'created',
+            room: id,
+            name,
+            private: priv
+          });
+
+          broadcastLobbyList();
+
+          return;
+        }
+
+
+        // JOIN
+        if (
+          msg.type === 'join'
+        ) {
+
+          const rid =
+            String(
+              msg.room || ''
+            ).slice(0, 32);
+
+          if (!rid) {
+            send(ws, {
+              type: 'error',
+              msg:
+                'room required'
+            });
+
+            return;
+          }
+
+          const room =
+            ensureRoom(rid);
+
+          const meta =
+            roomMeta.get(rid) ||
+            {
+              name: rid,
+              private: false,
+              password: ''
+            };
+
+
+          // PRIVATE LOBBY PASSWORD
+          if (
+            meta.private &&
+            String(
+              msg.password || ''
+            ) !==
+            String(
+              meta.password || ''
+            )
+          ) {
+            send(ws, {
+              type: 'error',
+              msg:
+                'wrong lobby password'
+            });
+
+            return;
+          }
+
+
+          // ROOM FULL
+          if (
+            room.clients.size >=
+            MAX_PLAYERS
+          ) {
+            send(ws, {
+              type: 'error',
+              msg:
+                'room full'
+            });
+
+            return;
+          }
+
+
+          c.room = room;
+
+          room.clients.add(
+            ws
+          );
+
+          createPlayer(
+            room,
+            ws.peerId,
+            ws
+          );
+
+
+          // WELCOME
+          send(ws, {
+            type: 'welcome',
+
+            peerId:
+              ws.peerId,
+
+            peers:
+              [
+                ...room.clients
+              ]
+                .filter(
+                  x => x !== ws
+                )
+                .map(
+                  x => x.peerId
+                ),
+
+            host:
+              [
+                ...room.clients
+              ][0]?.peerId ||
+              ws.peerId,
+
+            authoritative:
+              true,
+
+            lobby: {
+              id: rid,
+              name:
+                meta.name,
+              private:
+                !!meta.private
+            }
+          });
+
+
+          // PEER JOIN
           for (
-            const peer
-            of room
+            const peer of room.clients
           ) {
             if (
-              peer.readyState === 1
+              peer !== ws
             ) {
-              try {
-                peer.send(
-                  JSON.stringify({
-                    type:
-                      'peer-leave',
-                    peerId,
-                  })
+              send(peer, {
+                type:
+                  'peer-join',
+
+                peerId:
+                  ws.peerId
+              });
+            }
+          }
+
+          broadcastLobbyList();
+
+          return;
+        }
+
+
+        // GAME DATA
+        if (!c.room)
+          return;
+
+        const room =
+          c.room;
+
+        if (msg.data) {
+
+          const a =
+            msg.data.a;
+
+          const d =
+            msg.data.d || {};
+
+
+          // INPUT
+          if (
+            a === 'in' &&
+            d &&
+            typeof d.seq ===
+              'number'
+          ) {
+
+            const p =
+              room.players.get(
+                ws.peerId
+              );
+
+            if (p) {
+
+              p.input = {
+                m:
+                  Array.isArray(d.m)
+                    ? d.m
+                    : [0, 0],
+
+                a:
+                  Array.isArray(d.a)
+                    ? d.a
+                    : [1, 0],
+
+                f:
+                  d.f
+                    ? 1
+                    : 0,
+
+                w:
+                  d.w
+                    ? 1
+                    : 0,
+
+                af:
+                  Number.isFinite(
+                    d.af
+                  )
+                    ? d.af
+                    : 1,
+
+                dseq:
+                  Number(
+                    d.dseq
+                  ) || 0,
+
+                tseq:
+                  Number(
+                    d.tseq
+                  ) || 0
+              };
+
+              p.name =
+                p.name ||
+                ws.peerId.slice(
+                  0,
+                  6
                 );
-              } catch {}
             }
           }
 
-          room.delete(c.ws);
 
-          if (
-            roomHost.get(
-              roomId
-            ) === peerId
+          // PLAYER NAME
+          else if (
+            a === 'id' &&
+            d.name
           ) {
-            const remaining =
-              [...room];
 
-            if (
-              remaining.length
-            ) {
-              const newHost =
-                remaining[0]
-                  .peerId;
-
-              roomHost.set(
-                roomId,
-                newHost
+            const p =
+              room.players.get(
+                ws.peerId
               );
 
-              for (
-                const p
-                of remaining
-              ) {
-                if (
-                  p.readyState === 1
-                ) {
-                  try {
-                    p.send(
-                      JSON.stringify({
-                        type:
-                          'host-change',
-                        host:
-                          newHost,
-                      })
-                    );
-                  } catch {}
-                }
-              }
-            } else {
-              roomHost.delete(
-                roomId
-              );
+            if (p) {
+              p.name =
+                String(
+                  d.name
+                ).slice(
+                  0,
+                  24
+                );
             }
           }
 
-          if (
-            room.size === 0
-          ) {
-            rooms.delete(
-              roomId
-            );
 
-            roomPeers.delete(
-              roomId
-            );
+          // PING
+          else if (
+            a === 'png'
+          ) {
+
+            if (d.pong) {
+              send(ws, {
+                a: 'png',
+
+                d: {
+                  t: d.t,
+                  pong: 1
+                },
+
+                from:
+                  'server'
+              });
+            }
+          }
+
+
+          // VOTE
+          else if (
+            a === 'vote'
+          ) {
+
+            broadcast(room, {
+              a: 'vote',
+              d,
+              from:
+                ws.peerId
+            });
           }
         }
       }
+    );
 
-      clients.delete(
-        peerId
+
+    ws.on(
+      'close',
+      () => leave(ws)
+    );
+
+    ws.on(
+      'error',
+      () => leave(ws)
+    );
+  }
+);
+
+
+// ---------------------------------------------------------
+// SERVER GAME LOOP
+// ---------------------------------------------------------
+
+setInterval(
+  () => {
+
+    const now =
+      Date.now();
+
+    for (
+      const room of rooms.values()
+    ) {
+
+      const dt =
+        Math.min(
+          0.05,
+
+          (
+            now -
+            (
+              room.lastTick ||
+              now
+            )
+          ) / 1000
+        );
+
+      room.lastTick =
+        now;
+
+      tickRoom(
+        room,
+        now,
+        dt
       );
     }
-  }
-}, 15000);
+
+  },
+  16
+);
+
+
+// ---------------------------------------------------------
+// HEARTBEAT
+// ---------------------------------------------------------
+
+setInterval(
+  () => {
+
+    for (
+      const ws of wss.clients
+    ) {
+
+      if (
+        ws.isAlive === false
+      ) {
+        try {
+          ws.terminate();
+        }
+        catch {}
+
+        continue;
+      }
+
+      ws.isAlive = false;
+
+      try {
+        ws.ping();
+      }
+      catch {}
+    }
+
+  },
+  10000
+);
+
 
 console.log(
-  `[S] WebSocket relay + MaxAC listening on port ${port}`
+  'Authoritative server listening on',
+  port
 );
