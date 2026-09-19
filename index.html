@@ -1483,7 +1483,6 @@ class GameScene extends Phaser.Scene {
     for (let t = 0; t < total; t += step){
       const drag = Math.exp(-CFG.GRENADE_DRAG_K * step)
       vx *= drag; vy *= drag
-      vy += CFG.GRENADE_GRAVITY * step
       let nx = x + vx * step, ny = y + vy * step
 
       for (const r of this.wallRects){
@@ -2712,7 +2711,6 @@ class GameScene extends Phaser.Scene {
         const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
         b.vx *= drag
         b.vy *= drag
-        b.vy += CFG.GRENADE_GRAVITY * dt
 
         let nx = b.x + b.vx * dt
         let ny = b.y + b.vy * dt
@@ -3051,7 +3049,6 @@ class GameScene extends Phaser.Scene {
         const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
         g.vx *= drag
         g.vy *= drag
-        g.vy += CFG.GRENADE_GRAVITY * dt
 
         let nx = g.sprite.x + g.vx * dt
         let ny = g.sprite.y + g.vy * dt
