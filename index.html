@@ -216,9 +216,7 @@
   @media (max-height: 700px){
     #lobbyList{max-height:27vh;}
   }
-#fogOverlay{position:fixed;inset:0;z-index:3;pointer-events:none;
-  background:radial-gradient(circle 300px at 50% 50%,rgba(0,0,0,0) 0%,rgba(0,0,0,.08) 48%,rgba(0,0,0,.62) 76%,rgba(0,0,0,.92) 100%);
-  mix-blend-mode:multiply;transition:background .08s linear;}
+#fogOverlay{display:none !important;}
 </style>
 </style>
 </head>
@@ -3128,7 +3126,16 @@ class GameScene extends Phaser.Scene {
         }
       }
 
-      v.sprite.rotation = v.ta
+      /* Плавный поворот удалённых игроков: движение остаётся интерполированным,
+         а угол поворачивается по кратчайшей дуге без рывков. */
+      if (id !== this.myPeerId){
+        let da = v.ta - v.sprite.rotation
+        while (da > Math.PI) da -= Math.PI * 2
+        while (da < -Math.PI) da += Math.PI * 2
+        v.sprite.rotation += da * Math.min(1, dt * 10)
+      } else {
+        v.sprite.rotation = v.ta
+      }
       const vis = !v.dead
       v.sprite.setVisible(vis); v.bar.setVisible(vis)
 
