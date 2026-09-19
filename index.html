@@ -189,6 +189,34 @@
   #menu button:active{background:#0020cc;}
   #pid{font-size:clamp(10px,1.6vmin,13px);color:#8b949e;line-height:1.7;max-width:340px;word-break:break-all;}
   #hint{font-size:clamp(11px,1.8vmin,14px);color:#8b949e;line-height:1.7;max-width:320px;}
+  #lobbyPanel{width:min(620px,92vw);display:flex;flex-direction:column;gap:10px;}
+  #lobbyHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+  #lobbyHeader strong{font-size:clamp(14px,2.2vmin,19px);}
+  #refreshLobbies{padding:9px 14px;font-size:13px;background:#30363d;box-shadow:none;}
+  #lobbyList{width:100%;max-height:34vh;overflow:auto;display:flex;flex-direction:column;gap:7px;
+             padding-right:3px;}
+  .lobbyRow{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:10px;
+            padding:10px 12px;background:#161b22;border:1px solid #30363d;border-radius:8px;
+            text-align:left;}
+  .lobbyMain{min-width:0;}
+  .lobbyName{font-weight:bold;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lobbyMeta{font-size:11px;color:#8b949e;margin-top:3px;}
+  .lobbyLock{font-size:18px;width:24px;text-align:center;}
+  .lobbyJoin{padding:8px 12px!important;font-size:12px!important;box-shadow:none!important;}
+  .lobbyJoin:disabled{opacity:.4;cursor:not-allowed;}
+  #lobbyEmpty{color:#8b949e;font-size:13px;padding:12px;}
+  #lobbyStatus{min-height:18px;color:#8b949e;font-size:12px;}
+  #createLobbyBox{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;align-items:center;}
+  #createLobbyBox input{width:145px;}
+  #createLobbyBox select{padding:12px 10px;border-radius:8px;border:1px solid #30363d;
+                         background:#161b22;color:#e6edf3;font-family:monospace;}
+  #privateJoinBox{display:none;gap:7px;justify-content:center;align-items:center;flex-wrap:wrap;}
+  #privateJoinBox input{width:145px;}
+  #privateJoinBox button{background:#22aa66;box-shadow:0 0 12px #22aa66;}
+  @media (max-height: 700px){
+    #lobbyList{max-height:27vh;}
+  }
+</style>
 </style>
 </head>
 <body>
@@ -211,14 +239,35 @@
 <div id="menu">
   <h1>Shoot'n'cats</h1>
   <input id="nameInput" placeholder="твоё имя" value="" maxlength="14" />
-  <input id="roomInput" placeholder="код комнаты" value="arena1" />
-  <button id="playBtn">ИГРАТЬ</button>
+
+  <div id="lobbyPanel">
+    <div id="lobbyHeader">
+      <strong>🎮 Доступные лобби</strong>
+      <button id="refreshLobbies">↻ ОБНОВИТЬ</button>
+    </div>
+    <div id="lobbyList"><div id="lobbyEmpty">Загрузка лобби…</div></div>
+    <div id="lobbyStatus"></div>
+
+    <div id="createLobbyBox">
+      <input id="newLobbyName" placeholder="название лобби" maxlength="24" />
+      <select id="newLobbyType">
+        <option value="open">🌐 Открытое</option>
+        <option value="private">🔒 Закрытое</option>
+      </select>
+      <input id="newLobbyPassword" placeholder="пароль (для закрытого)" maxlength="32" style="display:none" />
+      <button id="createLobbyBtn">СОЗДАТЬ</button>
+    </div>
+
+    <div id="privateJoinBox">
+      <input id="privatePassword" type="password" placeholder="пароль лобби" maxlength="32" />
+      <button id="privateJoinBtn">ВОЙТИ</button>
+    </div>
+  </div>
+
   <div id="hint">
-    Левый стик — движение<br>
-    Правый стик — прицел и огонь<br>
-    💣 — гранаты: удерживай и отпусти (сила = дальность)<br>
-    ⚡ — рывок (кулдаун 1.4с)<br>
-    Бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💦 распылитель
+    Левый стик — движение · Правый стик — прицел и огонь<br>
+    💣 Гранаты: удерживай и отпусти (сила = дальность)<br>
+    ⚡ Рывок · бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💦 распылитель
   </div>
   <div id="pid">…generating identity…</div>
 </div>
@@ -1047,6 +1096,8 @@ class GameScene extends Phaser.Scene {
 
   create(){
     this.roomId = this.registry.get('roomId') || 'arena1'
+    this.roomPassword = this.registry.get('roomPassword') || ''
+    this.lobbyName = this.registry.get('lobbyName') || this.roomId
     this.identity = this.registry.get('identity')
     this.myName = this.registry.get('playerName') || 'anon'
     this.sfx = this.registry.get('sfx')
@@ -1466,7 +1517,7 @@ class GameScene extends Phaser.Scene {
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0
-      this.ws.send(JSON.stringify({ type: 'join', room: this.roomId }))
+      this.ws.send(JSON.stringify({ type: 'join', room: this.roomId, password: this.roomPassword || '' }))
     }
 
     this.ws.onmessage = ev => {
@@ -1482,31 +1533,18 @@ class GameScene extends Phaser.Scene {
       if (type === 'error') return
 
       if (type === 'welcome'){
-        this.serverHostId = msg.host
+        this.serverHostId = 'server'
         this.migrateMyId(msg.peerId)
-        const iAmHost = (msg.host === msg.peerId)
-        if (iAmHost){
-          this.isHost = true
-          this.hasBecomeClient = false
-          this.peerNames[this.myPeerId] = this.myName
-          this.sendId({ pubHash:this.identity.pubHash, mode:this.identity.mode, name:this.myName }, this.myPeerId)
-          this.becomeHost()
-        } else {
-          this.isHost = false
-          this.hasBecomeClient = true
-          for (const peerId of msg.peers){
-            if (peerId === this.myPeerId) continue
-            this.peers.add(peerId)
-            if (!this.views[peerId]) this.createView(peerId)
-            this.ac.ensure(peerId)
-          }
-          this.peerNames[this.myPeerId] = this.myName
-          if (msg.host){
-            this.sendId({ pubHash:this.identity.pubHash, mode:this.identity.mode, name:this.myName }, msg.host)
-            this.sendTok({ request:true }, msg.host)
-            this.sendId({ challenge:'hello-from-' + this.myPeerId }, msg.host)
-          }
+        this.isHost = false
+        this.hasBecomeClient = true
+        for (const peerId of (msg.peers || [])){
+          if (peerId === this.myPeerId) continue
+          this.peers.add(peerId)
+          if (!this.views[peerId]) this.createView(peerId)
+          this.ac.ensure(peerId)
         }
+        this.peerNames[this.myPeerId] = this.myName
+        this.sendId({ name:this.myName, pubHash:this.identity.pubHash, mode:this.identity.mode }, null)
         this.updateStatus()
         return
       }
@@ -1516,13 +1554,6 @@ class GameScene extends Phaser.Scene {
         this.peers.add(msg.peerId)
         if (!this.views[msg.peerId]) this.createView(msg.peerId)
         this.ac.ensure(msg.peerId)
-        if (this.isHost){
-          this.addPlayerToWorld(msg.peerId)
-          const p = this.ac.ensure(msg.peerId)
-          p.nonce = randomToken(12)
-          this.sendId({ challenge: p.nonce }, msg.peerId)
-          this.sendTok({ token: this.ac.issueToken(msg.peerId) }, msg.peerId)
-        }
         this.updateStatus()
         return
       }
@@ -1540,15 +1571,9 @@ class GameScene extends Phaser.Scene {
       }
 
       if (type === 'host-change'){
-        this.serverHostId = msg.host
-        if (msg.host === this.myPeerId){
-          this.isHost = true
-          this.hasBecomeClient = false
-          this.becomeHost()
-        } else {
-          this.isHost = false
-          this.hasBecomeClient = true
-        }
+        this.serverHostId = 'server'
+        this.isHost = false
+        this.hasBecomeClient = true
         this.updateStatus()
         return
       }
@@ -1587,15 +1612,20 @@ class GameScene extends Phaser.Scene {
     this.ws.send(JSON.stringify({ data: { a: action, d: data } }))
   }
 
-  sendInput  (d, id) { this.sendTo('in', d, id) }
+  sendServer(action, data){
+    if (!this.ws || this.ws.readyState !== 1) return
+    if (this.ws.bufferedAmount > 64 * 1024) return
+    this.ws.send(JSON.stringify({ data:{ a:action, d:data } }))
+  }
+  sendInput  (d, id) { this.sendServer('in', d) }
   sendState  (d, id) { this.sendTo('st', d, id) }
   sendBullet (d)     { this.broadcast('bl', d) }
   sendHit    (d)     { this.broadcast('hit', d) }
   sendExplosion(d)   { this.broadcast('gex', d) }
   sendTok    (d, id) { this.sendTo('tok', d, id) }
   sendBan    (d, id) { this.sendTo('ban', d, id) }
-  sendPing   (d, id) { this.sendTo('png', d, id) }
-  sendId     (d, id) { this.sendTo('id', d, id) }
+  sendPing   (d, id) { this.sendServer('png', d) }
+  sendId     (d, id) { this.sendServer('id', d) }
   sendVote   (d){
     if (this.isHost){ this.broadcast('vote', d) }
     else {
@@ -1605,18 +1635,15 @@ class GameScene extends Phaser.Scene {
   }
 
   onNetInput(data, fromId){
-    if (!this.isHost) return
     if (this.ac.bans.has(fromId)) return
     if (!this.ac.validateInput(fromId, data)) return
     data._t = performance.now()
     this.inputs[fromId] = data
   }
   onNetState(data){
-    if (this.isHost) return
     this.applyState(data)
   }
   onNetBullet(data){
-    if (this.isHost) return
     if (data.owner === this.myPeerId){
       const prefix = 'local_' + this.myPeerId
       const now = performance.now()
@@ -1650,11 +1677,9 @@ class GameScene extends Phaser.Scene {
     this.spawnGhostBullet(data)
   }
   onNetHit(data){
-    if (this.isHost) return
     this.applyHit(data)
   }
   onNetExplosion(data){
-    if (this.isHost) return
     this.applyExplosion(data)
   }
   onNetToken(data, fromId){
@@ -1685,8 +1710,6 @@ class GameScene extends Phaser.Scene {
     if (data.pong){
       p.rtt = performance.now() - data.t
       p.lastUpdate = performance.now()
-    } else {
-      this.sendPing({ t: data.t, pong: 1 }, fromId)
     }
   }
   async onNetIdentity(data, fromId){
@@ -2301,10 +2324,7 @@ class GameScene extends Phaser.Scene {
 
     if (time - this._lastPing > 5000){
       this._lastPing = time
-      const hostId = this.currentHostId()
-      if (hostId && hostId !== this.myPeerId){
-        this.sendPing({ t: performance.now(), pong: 0 }, hostId)
-      }
+      this.sendPing({ t: performance.now(), pong: 0 }, null)
     }
 
     if (!this.isHost && time - this._lastNameSent > 5000){
@@ -2339,51 +2359,7 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    if (this.isHost){
-      this.inputs[this.myPeerId] = {
-        m: [this.moveVec.x, this.moveVec.y],
-        a: [this.aimVec.x, this.aimVec.y],
-        f: firingFlag,
-        d: this.local.dead ? 1 : 0,
-        dseq: this.dashSeq,
-        w: this.weapon === 'grenade' ? 1 : 0,
-        af: this.aimForce,
-        tseq: this.throwSeq,       /* 🆕 */
-        _t: time,
-      }
-      this.rebuildPlayerGrid()
-      this.simulateHost(time, dt)
-    }
-
-    /* 🆕 клиент стреляет из ружья (гранаты — только по отпусканию) */
-    if (!this.isHost && !this.local.dead && this.weapon === 'rifle'){
-      const now = performance.now()
-      const behavior = this._computeFireBehavior(this.localBonuses, now)
-      if (this.firing && time - this._lastLocalShot > behavior.fireCd){
-        this._lastLocalShot = time
-        const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
-        const ax = this.aimVec.x / len
-        const ay = this.aimVec.y / len
-        this.sfx.shoot(behavior.kind, 0, 1)
-
-        if (behavior.opts.sprayer){
-          this.spawnLocalSprayer(ax, ay)
-        } else {
-          const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
-          this.spawnGhostBullet({
-            id,
-            x: this.local.x + ax * (CFG.PLAYER_R + 6),
-            y: this.local.y + ay * (CFG.PLAYER_R + 6),
-            vx: ax * CFG.BULLET_SPEED,
-            vy: ay * CFG.BULLET_SPEED,
-            owner: this.myPeerId,
-            homing: behavior.opts.homing,
-            ricochet: behavior.opts.ricochet,
-            sprayer: false,
-          })
-        }
-      }
-    }
+    /* Снаряды теперь создаёт авторитетный сервер. */
 
     this.updateGhostBullets(time, dt)
     this.renderPlayers(time, dt)
@@ -3188,12 +3164,143 @@ class GameScene extends Phaser.Scene {
 
   const sfx = new SoundEngine()
 
-  document.getElementById('playBtn').addEventListener('click', ()=>{
-    const code = (document.getElementById('roomInput').value || 'arena1').trim()
-    const rawName = (document.getElementById('nameInput').value || '').trim()
+  /* ============================================================
+     ЛОББИ: список открытых/закрытых комнат и создание комнат.
+     Список живёт на relay-сервере и показывает только активные комнаты.
+     ============================================================ */
+  let selectedPrivateLobby = null
+  let lobbySocket = null
+
+  function lobbyStatus(msg, error=false){
+    const el = document.getElementById('lobbyStatus')
+    if (el){ el.textContent = msg || ''; el.style.color = error ? '#f85149' : '#8b949e' }
+  }
+
+  function closeLobbySocket(){
+    try { if (lobbySocket) lobbySocket.close() } catch {}
+    lobbySocket = null
+  }
+
+  function lobbyRequest(payload, timeout=5000){
+    return new Promise((resolve,reject)=>{
+      let done = false
+      let ws
+      const finish = (err, value)=>{
+        if (done) return
+        done = true
+        try { ws?.close() } catch {}
+        err ? reject(err) : resolve(value)
+      }
+      try { ws = new WebSocket(RELAY_URL) }
+      catch(e){ reject(e); return }
+      const timer = setTimeout(()=>finish(new Error('timeout')), timeout)
+      ws.onopen = ()=>{
+        try { ws.send(JSON.stringify(payload)) }
+        catch(e){ clearTimeout(timer); finish(e) }
+      }
+      ws.onmessage = ev=>{
+        let msg
+        try { msg = JSON.parse(ev.data) } catch { return }
+        if (msg.type === 'lobbies' || msg.type === 'created' || msg.type === 'joined'){
+          clearTimeout(timer); finish(null, msg)
+        } else if (msg.type === 'error'){
+          clearTimeout(timer); finish(new Error(msg.msg || 'server error'))
+        }
+      }
+      ws.onerror = ()=>{ clearTimeout(timer); finish(new Error('connection error')) }
+      ws.onclose = ()=>{ if (!done){ clearTimeout(timer); finish(new Error('connection closed')) } }
+    })
+  }
+
+  async function refreshLobbies(){
+    lobbyStatus('Обновление списка…')
+    try {
+      const msg = await lobbyRequest({type:'list'})
+      const list = Array.isArray(msg.lobbies) ? msg.lobbies : []
+      const box = document.getElementById('lobbyList')
+      box.innerHTML = ''
+      if (!list.length){
+        box.innerHTML = '<div id="lobbyEmpty">Нет активных лобби. Создай первое!</div>'
+        lobbyStatus('Активных лобби: 0')
+        return
+      }
+      for (const r of list){
+        const row = document.createElement('div')
+        row.className = 'lobbyRow'
+        const locked = !!r.private
+        const full = Number(r.players) >= Number(r.maxPlayers || 12)
+        row.innerHTML = `
+          <div class="lobbyMain">
+            <div class="lobbyName">${escapeHtml(r.name || r.id)}</div>
+            <div class="lobbyMeta">#${escapeHtml(r.id)} · ${r.players}/${r.maxPlayers || 12} игроков</div>
+          </div>
+          <div class="lobbyLock">${locked ? '🔒' : '🌐'}</div>
+          <button class="lobbyJoin" ${full ? 'disabled' : ''}>${full ? 'ПОЛНО' : 'ВОЙТИ'}</button>
+        `
+        row.querySelector('.lobbyJoin').addEventListener('click', ()=>{
+          if (locked){
+            selectedPrivateLobby = r
+            document.getElementById('privatePassword').value = ''
+            document.getElementById('privateJoinBox').style.display = 'flex'
+            lobbyStatus('Введите пароль для «' + (r.name || r.id) + '»')
+            document.getElementById('privatePassword').focus()
+          } else {
+            startGame(r.id, '', r.name || r.id)
+          }
+        })
+        box.appendChild(row)
+      }
+      lobbyStatus('Активных лобби: ' + list.length)
+    } catch(e){
+      lobbyStatus('Не удалось получить список лобби: ' + (e.message || e), true)
+      document.getElementById('lobbyList').innerHTML =
+        '<div id="lobbyEmpty">Сервер лобби недоступен.</div>'
+    }
+  }
+
+  async function createLobby(){
+    const rawName = document.getElementById('nameInput').value || ''
+    const playerName = cleanName(rawName) || ('Player' + Math.floor(Math.random()*999))
+    const lobbyName = String(document.getElementById('newLobbyName').value || '').trim().slice(0,24)
+    const kind = document.getElementById('newLobbyType').value
+    const password = String(document.getElementById('newLobbyPassword').value || '').trim().slice(0,32)
+
+    if (!lobbyName){ lobbyStatus('Укажи название лобби.', true); return }
+    if (kind === 'private' && !password){
+      lobbyStatus('Для закрытого лобби нужен пароль.', true); return
+    }
+
+    lobbyStatus('Создание лобби…')
+    try {
+      const msg = await lobbyRequest({
+        type:'create',
+        name:lobbyName,
+        private:kind === 'private',
+        password
+      })
+      document.getElementById('newLobbyName').value = ''
+      document.getElementById('newLobbyPassword').value = ''
+      lobbyStatus('Лобби создано.')
+      startGame(msg.room, password, lobbyName)
+    } catch(e){
+      lobbyStatus('Не удалось создать лобби: ' + (e.message || e), true)
+    }
+  }
+
+  async function joinPrivateLobby(){
+    if (!selectedPrivateLobby) return
+    const password = String(document.getElementById('privatePassword').value || '').trim()
+    if (!password){ lobbyStatus('Введите пароль.', true); return }
+    startGame(selectedPrivateLobby.id, password, selectedPrivateLobby.name || selectedPrivateLobby.id)
+  }
+
+  function startGame(roomId, roomPassword='', lobbyName=''){
+    const rawName = document.getElementById('nameInput').value || ''
     const name = cleanName(rawName) || ('Player' + Math.floor(Math.random()*999))
-    DBG.log('BOOT', 'starting with room:', JSON.stringify(code), 'name:', name)
+    DBG.log('BOOT', 'starting lobby:', roomId, 'name:', name, 'lobby:', lobbyName)
+    closeLobbySocket()
     document.getElementById('menu').style.display = 'none'
+    document.getElementById('privateJoinBox').style.display = 'none'
 
     try {
       sfx.init()
@@ -3210,16 +3317,30 @@ class GameScene extends Phaser.Scene {
       scene: [BootScene, GameScene],
       callbacks: {
         preBoot: (game)=>{
-          game.registry.set('roomId', code)
+          game.registry.set('roomId', roomId)
+          game.registry.set('roomPassword', roomPassword)
           game.registry.set('identity', identity)
           game.registry.set('playerName', name)
           game.registry.set('sfx', sfx)
+          game.registry.set('lobbyName', lobbyName)
         }
       },
     })
+  }
+
+  document.getElementById('refreshLobbies').addEventListener('click', refreshLobbies)
+  document.getElementById('createLobbyBtn').addEventListener('click', createLobby)
+  document.getElementById('privateJoinBtn').addEventListener('click', joinPrivateLobby)
+  document.getElementById('newLobbyType').addEventListener('change', ()=>{
+    document.getElementById('newLobbyPassword').style.display =
+      document.getElementById('newLobbyType').value === 'private' ? 'block' : 'none'
+  })
+  document.getElementById('privatePassword').addEventListener('keydown', e=>{
+    if (e.key === 'Enter') joinPrivateLobby()
   })
 
-  DBG.log('BOOT', 'play button ready')
+  refreshLobbies()
+  DBG.log('BOOT', 'lobby browser ready')
 })()
 </script>
 </body>
