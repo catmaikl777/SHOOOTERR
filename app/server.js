@@ -1,18 +1,16 @@
 // ============================================================
-// server.js — WebSocket relay + MaxAC + Lobbies
+// server.js — WebSocket relay + MaxAC
 // ============================================================
 const { WebSocketServer } = require('ws');
 const fs = require('fs');
 
 const port = process.env.PORT || 3000;
-const wss = new WebSocketServer({
-  port,
-  maxPayload: 4096
-});
+const wss = new WebSocketServer({ port, maxPayload: 8192 });
 
 const AC = {
-  MAX_PACKET_BYTES: 2000,
-  MAX_MSG_PER_SEC: 60,
+  MAX_PACKET_BYTES: 8192,
+  MAX_MSG_PER_SEC: 100,
+
   MAX_ROOMS: 200,
   MAX_CLIENTS_PER_ROOM: 12,
   MAX_SEQ_GAP: 500,
@@ -23,86 +21,17 @@ const AC = {
 
   BAN_FILE: './bans.json',
   IP_BAN_MS: 60 * 60 * 1000,
-  MAX_BANS_PER_IP: 3
+  MAX_BANS_PER_IP: 3,
 };
 
 const rooms = new Map();
 const roomHost = new Map();
+const roomPeers = new Map();
 const clients = new Map();
 
 const bannedHashes = new Set();
 const ipStrikes = new Map();
 const ipBanList = new Map();
-
-// Данные лобби
-const roomMeta = new Map();
-
-
-// ============================================================
-// LOBBIES
-// ============================================================
-
-function cleanLobbyName(name) {
-  return String(name || '')
-    .replace(/[<>]/g, '')
-    .trim()
-    .slice(0, 32) || 'Без названия';
-}
-
-function makeRoomId() {
-  let id;
-
-  do {
-    id = 'room_' + Math.random()
-      .toString(36)
-      .slice(2, 8);
-  } while (rooms.has(id));
-
-  return id;
-}
-
-function lobbyList() {
-  const out = [];
-
-  for (const [id, room] of rooms) {
-    const meta = roomMeta.get(id) || {
-      name: id,
-      private: false
-    };
-
-    out.push({
-      id,
-      name: meta.name,
-      private: !!meta.private,
-      players: room.size,
-      maxPlayers: AC.MAX_CLIENTS_PER_ROOM
-    });
-  }
-
-  return out;
-}
-
-function sendLobbyList(ws) {
-  try {
-    ws.send(JSON.stringify({
-      type: 'lobbies',
-      lobbies: lobbyList()
-    }));
-  } catch {}
-}
-
-function broadcastLobbyList() {
-  for (const ws of wss.clients) {
-    if (ws.readyState === 1) {
-      sendLobbyList(ws);
-    }
-  }
-}
-
-
-// ============================================================
-// SECURITY / VALIDATION
-// ============================================================
 
 function safeParse(raw) {
   if (!raw) return null;
@@ -121,29 +50,28 @@ function safeParse(raw) {
 }
 
 function validateVec(v) {
-  return Array.isArray(v) &&
+  return (
+    Array.isArray(v) &&
     v.length === 2 &&
     Number.isFinite(v[0]) &&
     Number.isFinite(v[1]) &&
     Math.abs(v[0]) <= 1.5 &&
-    Math.abs(v[1]) <= 1.5;
+    Math.abs(v[1]) <= 1.5
+  );
 }
 
 function validateInputPayload(d) {
-  if (!d || typeof d !== 'object') {
-    return false;
-  }
+  if (!d || typeof d !== 'object') return false;
 
-  if (!validateVec(d.m) || !validateVec(d.a)) {
-    return false;
-  }
+  if (!validateVec(d.m)) return false;
+  if (!validateVec(d.a)) return false;
 
-  if (d.f !== 0 && d.f !== 1) {
-    return false;
-  }
+  if (d.f !== 0 && d.f !== 1) return false;
 
-  if (typeof d.seq !== 'number' ||
-      !Number.isFinite(d.seq)) {
+  if (
+    typeof d.seq !== 'number' ||
+    !Number.isFinite(d.seq)
+  ) {
     return false;
   }
 
@@ -153,11 +81,6 @@ function validateInputPayload(d) {
 
   return true;
 }
-
-
-// ============================================================
-// BANS
-// ============================================================
 
 function loadBans() {
   try {
@@ -190,11 +113,6 @@ function saveBans() {
 
 loadBans();
 
-
-// ============================================================
-// CLIENTS
-// ============================================================
-
 function ensureClient(ws, ip) {
   let c = clients.get(ws.peerId);
 
@@ -215,7 +133,7 @@ function ensureClient(ws, ip) {
       verified: false,
 
       joinedAt: Date.now(),
-      room: null
+      room: null,
     };
 
     clients.set(ws.peerId, c);
@@ -236,13 +154,12 @@ function decay(c) {
   }
 }
 
-function strike(c, reason, weight = 1) {
-  c.strikes += weight;
+function strike(c, reason, w = 1) {
+  c.strikes += w;
   c.lastStrike = Date.now();
 
   console.warn(
-    `[AC] strike ${c.peerId?.slice(0, 8)} ` +
-    `"${reason}" (+${weight}) = ${c.strikes}`
+    `[AC] strike ${c.peerId?.slice(0, 8)} "${reason}" (+${w}) = ${c.strikes}`
   );
 
   if (c.strikes >= AC.STRIKE_KICK) {
@@ -260,15 +177,16 @@ function banClient(c, reason) {
   }
 
   console.warn(
-    `[AC] BAN peer=${c.peerId?.slice(0, 8)} ` +
-    `reason="${reason}"`
+    `[AC] BAN peer=${c.peerId?.slice(0, 8)} reason="${reason}"`
   );
 
   try {
-    c.ws.send(JSON.stringify({
-      type: 'banned',
-      reason
-    }));
+    c.ws.send(
+      JSON.stringify({
+        type: 'banned',
+        reason,
+      })
+    );
   } catch {}
 
   try {
@@ -299,11 +217,6 @@ function checkRate(c) {
   return true;
 }
 
-
-// ============================================================
-// CLEANUP
-// ============================================================
-
 function cleanupClient(ws, reason) {
   const c = clients.get(ws.peerId);
 
@@ -313,7 +226,6 @@ function cleanupClient(ws, reason) {
 
   if (!roomId) {
     clients.delete(c.peerId);
-    broadcastLobbyList();
     return;
   }
 
@@ -321,25 +233,30 @@ function cleanupClient(ws, reason) {
 
   if (!room) {
     clients.delete(c.peerId);
-    broadcastLobbyList();
     return;
   }
 
   room.delete(ws);
 
-  // Сообщаем остальным, что игрок вышел
+  const peerMap = roomPeers.get(roomId);
+
+  if (peerMap) {
+    peerMap.delete(c.peerId);
+  }
+
   for (const peer of room) {
     if (peer.readyState === 1) {
       try {
-        peer.send(JSON.stringify({
-          type: 'peer-leave',
-          peerId: c.peerId
-        }));
+        peer.send(
+          JSON.stringify({
+            type: 'peer-leave',
+            peerId: c.peerId,
+          })
+        );
       } catch {}
     }
   }
 
-  // Если вышел хост — назначаем нового
   if (roomHost.get(roomId) === c.peerId) {
     const remaining = [...room];
 
@@ -351,10 +268,12 @@ function cleanupClient(ws, reason) {
       for (const p of remaining) {
         if (p.readyState === 1) {
           try {
-            p.send(JSON.stringify({
-              type: 'host-change',
-              host: newHost
-            }));
+            p.send(
+              JSON.stringify({
+                type: 'host-change',
+                host: newHost,
+              })
+            );
           } catch {}
         }
       }
@@ -363,28 +282,66 @@ function cleanupClient(ws, reason) {
     }
   }
 
-  // Пустое лобби удаляем
   if (room.size === 0) {
     rooms.delete(roomId);
-    roomMeta.delete(roomId);
+    roomPeers.delete(roomId);
   }
 
   clients.delete(c.peerId);
-
-  broadcastLobbyList();
 
   console.log(
     `[S] - ${c.peerId.slice(0, 8)} (${reason})`
   );
 }
 
+function sendJSON(ws, obj) {
+  if (!ws || ws.readyState !== 1) {
+    return false;
+  }
 
-// ============================================================
-// WEBSOCKET
-// ============================================================
+  // Не даём медленному клиенту
+  // накапливать огромную очередь.
+  if (ws.bufferedAmount > 96 * 1024) {
+    return false;
+  }
+
+  try {
+    ws.send(obj);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function broadcastRoom(
+  room,
+  payloadObj,
+  exceptWs
+) {
+  const raw =
+    typeof payloadObj === 'string'
+      ? payloadObj
+      : JSON.stringify(payloadObj);
+
+  for (const peer of room) {
+    if (
+      peer === exceptWs ||
+      peer.readyState !== 1
+    ) {
+      continue;
+    }
+
+    if (peer.bufferedAmount > 96 * 1024) {
+      continue;
+    }
+
+    try {
+      peer.send(raw);
+    } catch {}
+  }
+}
 
 wss.on('connection', (ws, req) => {
-
   const ip = (
     req.headers['x-forwarded-for'] ||
     req.socket.remoteAddress ||
@@ -393,14 +350,20 @@ wss.on('connection', (ws, req) => {
     .split(',')[0]
     .trim();
 
-  if (
-    ws._socket &&
-    ws._socket.setNoDelay
-  ) {
-    ws._socket.setNoDelay(true);
+  // Минимизация задержки TCP.
+  if (ws._socket) {
+    if (ws._socket.setNoDelay) {
+      ws._socket.setNoDelay(true);
+    }
+
+    if (ws._socket.setKeepAlive) {
+      ws._socket.setKeepAlive(
+        true,
+        15000
+      );
+    }
   }
 
-  // Проверка IP-бана
   const banUntil = ipBanList.get(ip);
 
   if (
@@ -414,7 +377,6 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
-  // ID игрока
   ws.peerId =
     'peer_' +
     Math.random()
@@ -429,13 +391,7 @@ wss.on('connection', (ws, req) => {
     `[S] + ${c.peerId.slice(0, 8)} from ${ip}`
   );
 
-
-  // ==========================================================
-  // MESSAGE
-  // ==========================================================
-
   ws.on('message', raw => {
-
     const msg = safeParse(raw);
 
     if (!msg) {
@@ -453,156 +409,45 @@ wss.on('connection', (ws, req) => {
 
     decay(c);
 
-
     // ========================================================
-    // СПИСОК ЛОББИ
-    // ========================================================
-
-    if (msg.type === 'list') {
-      sendLobbyList(ws);
-      return;
-    }
-
-
-    // ========================================================
-    // СОЗДАНИЕ ЛОББИ
-    // ========================================================
-
-    if (msg.type === 'create') {
-
-      if (rooms.size >= AC.MAX_ROOMS) {
-        try {
-          ws.send(JSON.stringify({
-            type: 'error',
-            msg: 'too many rooms'
-          }));
-        } catch {}
-
-        return;
-      }
-
-      const isPrivate = !!msg.private;
-
-      const password = isPrivate
-        ? String(msg.password || '').slice(0, 64)
-        : '';
-
-      if (isPrivate && !password) {
-        try {
-          ws.send(JSON.stringify({
-            type: 'error',
-            msg: 'password required'
-          }));
-        } catch {}
-
-        return;
-      }
-
-      const roomId = makeRoomId();
-
-      rooms.set(
-        roomId,
-        new Set()
-      );
-
-      roomMeta.set(roomId, {
-        name: cleanLobbyName(msg.name),
-        private: isPrivate,
-        password
-      });
-
-      try {
-        ws.send(JSON.stringify({
-          type: 'created',
-          room: roomId,
-          name: roomMeta.get(roomId).name,
-          private: isPrivate
-        }));
-      } catch {}
-
-      broadcastLobbyList();
-
-      console.log(
-        `[Lobby] created ${roomId} ` +
-        `"${roomMeta.get(roomId).name}" ` +
-        `private=${isPrivate}`
-      );
-
-      return;
-    }
-
-
-    // ========================================================
-    // ВХОД В ЛОББИ
+    // JOIN
     // ========================================================
 
     if (msg.type === 'join') {
-
       if (c.room) {
         strike(c, 'double join');
         return;
       }
 
-      const roomId =
-        String(msg.room || '').slice(0, 32);
+      const roomId = String(
+        msg.room || ''
+      ).slice(0, 32);
 
       if (!roomId) {
         strike(c, 'no room');
         return;
       }
 
-      // Для совместимости создаём отсутствующую комнату
       if (!rooms.has(roomId)) {
         rooms.set(
           roomId,
           new Set()
         );
-
-        roomMeta.set(roomId, {
-          name: roomId,
-          private: false,
-          password: ''
-        });
       }
-
-      const meta =
-        roomMeta.get(roomId) || {
-          name: roomId,
-          private: false,
-          password: ''
-        };
-
-
-      // Проверяем пароль
-      if (
-        meta.private &&
-        String(msg.password || '') !== meta.password
-      ) {
-
-        try {
-          ws.send(JSON.stringify({
-            type: 'error',
-            msg: 'wrong password'
-          }));
-        } catch {}
-
-        return;
-      }
-
 
       const room = rooms.get(roomId);
 
-      // Комната заполнена
       if (
         room.size >=
         AC.MAX_CLIENTS_PER_ROOM
       ) {
-
         try {
-          ws.send(JSON.stringify({
-            type: 'error',
-            msg: 'room full'
-          }));
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              msg: 'room full',
+            })
+          );
         } catch {}
 
         try {
@@ -615,22 +460,33 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
-
-      // Добавляем игрока
       c.room = roomId;
       ws.roomId = roomId;
 
       room.add(ws);
 
+      let peerMap =
+        roomPeers.get(roomId);
 
-      // Назначаем хоста
+      if (!peerMap) {
+        peerMap = new Map();
+        roomPeers.set(
+          roomId,
+          peerMap
+        );
+      }
+
+      peerMap.set(
+        c.peerId,
+        ws
+      );
+
       if (!roomHost.has(roomId)) {
         roomHost.set(
           roomId,
           c.peerId
         );
       }
-
 
       const existingPeers =
         [...room]
@@ -641,60 +497,42 @@ wss.on('connection', (ws, req) => {
               id !== c.peerId
           );
 
-
-      // Ответ подключившемуся
       try {
-        ws.send(JSON.stringify({
-          type: 'welcome',
-
-          peerId: c.peerId,
-
-          peers: existingPeers,
-
-          host:
-            roomHost.get(roomId),
-
-          lobbyName:
-            meta.name,
-
-          private:
-            !!meta.private
-        }));
+        ws.send(
+          JSON.stringify({
+            type: 'welcome',
+            peerId: c.peerId,
+            peers: existingPeers,
+            host: roomHost.get(roomId),
+          })
+        );
       } catch {}
 
-
-      // Уведомляем остальных
       for (const peer of room) {
-
         if (
           peer !== ws &&
           peer.readyState === 1
         ) {
-
           try {
-            peer.send(JSON.stringify({
-              type: 'peer-join',
-              peerId: c.peerId
-            }));
+            peer.send(
+              JSON.stringify({
+                type: 'peer-join',
+                peerId: c.peerId,
+              })
+            );
           } catch {}
         }
       }
 
-
       console.log(
-        `[Room ${roomId}] + ` +
-        `${c.peerId.slice(0, 8)} ` +
-        `total=${room.size}`
+        `[Room ${roomId}] + ${c.peerId.slice(0, 8)} total=${room.size}`
       );
-
-      broadcastLobbyList();
 
       return;
     }
 
-
     // ========================================================
-    // ДАЛЬШЕ НУЖНО БЫТЬ В ЛОББИ
+    // MESSAGE BEFORE JOIN
     // ========================================================
 
     if (!c.room) {
@@ -703,13 +541,11 @@ wss.on('connection', (ws, req) => {
         'msg before join',
         AC.STRIKE_SEVERE
       );
-
       return;
     }
 
-
     // ========================================================
-    // PLAYER ID / BAN HASH
+    // ID / PUBLIC HASH
     // ========================================================
 
     if (
@@ -717,23 +553,20 @@ wss.on('connection', (ws, req) => {
       msg.d &&
       msg.d.pubHash
     ) {
-
-      const hash =
-        String(msg.d.pubHash)
-          .slice(0, 64);
+      const hash = String(
+        msg.d.pubHash
+      ).slice(0, 64);
 
       if (bannedHashes.has(hash)) {
         banClient(
           c,
           'persistent ban'
         );
-
         return;
       }
 
       c.pubHash = hash;
     }
-
 
     // ========================================================
     // INPUT
@@ -743,7 +576,6 @@ wss.on('connection', (ws, req) => {
       msg.a === 'in' &&
       msg.d
     ) {
-
       const d = msg.d;
 
       if (!validateInputPayload(d)) {
@@ -752,7 +584,6 @@ wss.on('connection', (ws, req) => {
           'bad input',
           AC.STRIKE_SEVERE
         );
-
         return;
       }
 
@@ -762,29 +593,26 @@ wss.on('connection', (ws, req) => {
           'replay',
           AC.STRIKE_SEVERE
         );
-
         return;
       }
 
       if (
         c.seq >= 0 &&
-        d.seq - c.seq > AC.MAX_SEQ_GAP
+        d.seq - c.seq >
+          AC.MAX_SEQ_GAP
       ) {
-
         strike(
           c,
           'seq gap'
         );
-
         return;
       }
 
       c.seq = d.seq;
     }
 
-
     // ========================================================
-    // HOST ONLY ACTIONS
+    // HOST-ONLY MESSAGES
     // ========================================================
 
     if (
@@ -793,61 +621,51 @@ wss.on('connection', (ws, req) => {
       msg.a === 'hit' ||
       msg.a === 'pk'
     ) {
-
       const hostId =
         roomHost.get(c.room);
 
       if (
         hostId !== c.peerId
       ) {
-
         strike(
           c,
           `${msg.a} from non-host`,
           AC.STRIKE_SEVERE
         );
-
         return;
       }
     }
-
 
     // ========================================================
     // BAN
     // ========================================================
 
     if (msg.a === 'ban') {
-
       const hostId =
         roomHost.get(c.room);
 
       if (
         hostId !== c.peerId
       ) {
-
         strike(
           c,
           'ban from non-host',
           AC.STRIKE_SEVERE
         );
-
         return;
       }
 
       const target =
-        msg.d &&
-        msg.d.id;
+        msg.d && msg.d.id;
 
       if (
         target &&
         target !== c.peerId
       ) {
-
         const tc =
           clients.get(target);
 
         if (tc) {
-
           if (msg.d.pubHash) {
             bannedHashes.add(
               msg.d.pubHash
@@ -862,7 +680,7 @@ wss.on('connection', (ws, req) => {
                 type: 'banned',
                 reason:
                   msg.d.reason ||
-                  'banned'
+                  'banned',
               })
             );
           } catch {}
@@ -877,11 +695,6 @@ wss.on('connection', (ws, req) => {
       }
     }
 
-
-    // ========================================================
-    // RELAY GAME DATA
-    // ========================================================
-
     const room =
       rooms.get(c.room);
 
@@ -889,117 +702,111 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
+    // ========================================================
+    // DIRECT MESSAGE
+    // ========================================================
 
-    // Сообщение конкретному игроку
     if (msg.to) {
+      const peerMap =
+        roomPeers.get(c.room);
 
       const target =
-        [...room].find(
-          p => p.peerId === msg.to
+        peerMap &&
+        peerMap.get(
+          String(msg.to)
         );
 
       if (
         target &&
         target.readyState === 1
       ) {
-
-        try {
-          target.send(
-            JSON.stringify({
-              ...msg.data,
-              from: c.peerId
-            })
-          );
-        } catch {}
+        sendJSON(
+          target,
+          JSON.stringify({
+            ...msg.data,
+            from: c.peerId,
+          })
+        );
       }
 
+      return;
     }
 
-    // Broadcast всем остальным
-    else if (msg.data) {
+    // ========================================================
+    // BROADCAST
+    // ========================================================
+
+    if (msg.data) {
+      // JSON создаётся ОДИН раз,
+      // а не отдельно для каждого игрока.
+      const payload = {
+        ...msg.data,
+        from: c.peerId,
+      };
+
+      const raw =
+        JSON.stringify(payload);
 
       for (const peer of room) {
-
-        if (peer === ws) {
-          continue;
-        }
-
         if (
+          peer === ws ||
           peer.readyState !== 1
         ) {
           continue;
         }
 
-
-        // Не отправляем broadcast
-        // обратно владельцу события
+        // Не отправляем собственную пулю
+        // обратно её владельцу.
         if (
           msg.data.a === 'bl' &&
           msg.data.d &&
-          msg.data.d.owner === peer.peerId
+          msg.data.d.owner ===
+            peer.peerId
         ) {
           continue;
         }
 
+        // Медленный клиент не должен
+        // тормозить остальных.
+        if (
+          peer.bufferedAmount >
+          96 * 1024
+        ) {
+          continue;
+        }
 
         try {
-          peer.send(
-            JSON.stringify({
-              ...msg.data,
-              from: c.peerId
-            })
-          );
+          peer.send(raw);
         } catch {}
       }
     }
   });
 
+  ws.on('close', () => {
+    cleanupClient(
+      ws,
+      'close'
+    );
+  });
 
-  // ==========================================================
-  // CLOSE
-  // ==========================================================
+  ws.on('error', err => {
+    console.error(
+      `[S] err:`,
+      err.message
+    );
+  });
 
-  ws.on(
-    'close',
-    () => cleanupClient(ws, 'close')
-  );
-
-
-  // ==========================================================
-  // ERROR
-  // ==========================================================
-
-  ws.on(
-    'error',
-    err =>
-      console.error(
-        `[S] err:`,
-        err.message
-      )
-  );
-
-
-  // ==========================================================
-  // PONG
-  // ==========================================================
-
-  ws.on(
-    'pong',
-    () => {
-      ws.isAlive = true;
-    }
-  );
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
 });
 
-
 // ============================================================
-// PING
+// WEBSOCKET HEARTBEAT
 // ============================================================
 
 setInterval(() => {
-
   wss.clients.forEach(ws => {
-
     if (ws.isAlive === false) {
       try {
         ws.terminate();
@@ -1014,16 +821,13 @@ setInterval(() => {
       ws.ping();
     } catch {}
   });
-
 }, 10000);
 
-
 // ============================================================
-// CLEANUP DEAD CLIENTS
+// CLEANUP
 // ============================================================
 
 setInterval(() => {
-
   const activeIds =
     new Set(
       [...wss.clients]
@@ -1034,32 +838,29 @@ setInterval(() => {
     const [peerId, c]
     of clients
   ) {
-
     if (
       !activeIds.has(peerId)
     ) {
-
       const roomId = c.room;
 
       if (roomId) {
-
         const room =
           rooms.get(roomId);
 
         if (room) {
-
-          // Сообщаем игрокам
-          for (const peer of room) {
-
+          for (
+            const peer
+            of room
+          ) {
             if (
               peer.readyState === 1
             ) {
-
               try {
                 peer.send(
                   JSON.stringify({
-                    type: 'peer-leave',
-                    peerId
+                    type:
+                      'peer-leave',
+                    peerId,
                   })
                 );
               } catch {}
@@ -1068,20 +869,20 @@ setInterval(() => {
 
           room.delete(c.ws);
 
-
-          // Новый хост
           if (
-            roomHost.get(roomId) ===
-            peerId
+            roomHost.get(
+              roomId
+            ) === peerId
           ) {
-
             const remaining =
               [...room];
 
-            if (remaining.length) {
-
+            if (
+              remaining.length
+            ) {
               const newHost =
-                remaining[0].peerId;
+                remaining[0]
+                  .peerId;
 
               roomHost.set(
                 roomId,
@@ -1089,52 +890,52 @@ setInterval(() => {
               );
 
               for (
-                const p of remaining
+                const p
+                of remaining
               ) {
-
                 if (
                   p.readyState === 1
                 ) {
-
                   try {
                     p.send(
                       JSON.stringify({
-                        type: 'host-change',
-                        host: newHost
+                        type:
+                          'host-change',
+                        host:
+                          newHost,
                       })
                     );
                   } catch {}
                 }
               }
-
             } else {
-              roomHost.delete(roomId);
+              roomHost.delete(
+                roomId
+              );
             }
           }
 
+          if (
+            room.size === 0
+          ) {
+            rooms.delete(
+              roomId
+            );
 
-          // Удаляем пустую комнату
-          if (room.size === 0) {
-            rooms.delete(roomId);
-            roomMeta.delete(roomId);
+            roomPeers.delete(
+              roomId
+            );
           }
         }
       }
 
-      clients.delete(peerId);
-
-      broadcastLobbyList();
+      clients.delete(
+        peerId
+      );
     }
   }
-
 }, 15000);
 
-
-// ============================================================
-// START
-// ============================================================
-
 console.log(
-  `[S] WebSocket relay + MaxAC + Lobbies ` +
-  `listening on port ${port}`
+  `[S] WebSocket relay + MaxAC listening on port ${port}`
 );
