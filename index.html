@@ -216,6 +216,9 @@
   @media (max-height: 700px){
     #lobbyList{max-height:27vh;}
   }
+#fogOverlay{position:fixed;inset:0;z-index:3;pointer-events:none;
+  background:radial-gradient(circle 300px at 50% 50%,rgba(0,0,0,0) 0%,rgba(0,0,0,.08) 48%,rgba(0,0,0,.62) 76%,rgba(0,0,0,.92) 100%);
+  mix-blend-mode:multiply;transition:background .08s linear;}
 </style>
 </style>
 </head>
@@ -229,6 +232,7 @@
 <div id="ac"></div>
 <div id="killfeed"></div>
 <div id="vignette"></div>
+<div id="fogOverlay"></div>
 <button id="voteBtn" style="display:none">VOTE HOST</button>
 <button id="soundBtn" style="display:none">🔊</button>
 <div id="actionBtns" style="display:none">
@@ -1163,6 +1167,8 @@ class GameScene extends Phaser.Scene {
     /* 🆕 счётчик брошенных гранат */
     this.throwSeq = 0
     this.lastLocalThrow = 0
+    this.grenadePreview = this.add.graphics().setDepth(14)
+    this.fogOverlay = document.getElementById('fogOverlay')
 
     this.hostBlacklist = new Set()
     this.votes = new Map()
@@ -1428,6 +1434,7 @@ class GameScene extends Phaser.Scene {
     joyR.on('end', ()=>{
       const wasFiring = this.firing
       this.firing = false
+      if (this.grenadePreview) this.grenadePreview.clear()
       if (wasFiring && this.weapon === 'grenade' && !this.local.dead){
         this._doGrenadeThrow()
       }
@@ -2294,6 +2301,54 @@ class GameScene extends Phaser.Scene {
     delete this.views[id]
   }
 
+  updateFog(){
+    if (!this.fogOverlay) return
+    const cam=this.cameras.main
+    const zoom=cam.zoom||1
+    const sx=(this.local.x-cam.scrollX)*zoom
+    const sy=(this.local.y-cam.scrollY)*zoom
+    const radius=Math.max(150,Math.min(360,360*zoom))
+    this.fogOverlay.style.background=`radial-gradient(circle ${radius}px at ${sx}px ${sy}px,rgba(0,0,0,0) 0%,rgba(0,0,0,.08) 45%,rgba(0,0,0,.64) 76%,rgba(0,0,0,.93) 100%)`
+  }
+
+  updateGrenadeTrajectory(){
+    if (!this.grenadePreview) return
+    this.grenadePreview.clear()
+    if (this.weapon!=='grenade' || !this.firing || this.local.dead) return
+
+    const len=Math.hypot(this.aimVec.x,this.aimVec.y)||1
+    const ax=this.aimVec.x/len, ay=this.aimVec.y/len
+    let force=clamp(this.aimForce||1,CFG.GRENADE_MIN_FORCE,1)
+    let x=this.local.x+ax*(CFG.PLAYER_R+8), y=this.local.y+ay*(CFG.PLAYER_R+8)
+    let vx=ax*CFG.GRENADE_SPEED*force, vy=ay*CFG.GRENADE_SPEED*force
+    const dt=.035, dragK=CFG.GRENADE_DRAG_K
+    let landing={x,y}; let stopped=false
+    this.grenadePreview.lineStyle(2,0xffffff,.82)
+    for(let i=0;i<48;i++){
+      const drag=Math.exp(-dragK*dt); vx*=drag; vy*=drag
+      const nx=x+vx*dt, ny=y+vy*dt
+      let hit=null
+      for(const r of this.wallRects){
+        if(nx>r.x-CFG.GRENADE_R&&nx<r.x+r.w+CFG.GRENADE_R&&ny>r.y-CFG.GRENADE_R&&ny<r.y+r.h+CFG.GRENADE_R){hit=r;break}
+      }
+      if(hit){
+        const q=resolveCircleRect(nx,ny,CFG.GRENADE_R,hit)
+        if(q){x=q.x;y=q.y}
+        vx=0;vy=0;stopped=true;landing={x,y}
+      }else{x=nx;y=ny;landing={x,y}}
+      if(i%2===0){
+        this.grenadePreview.fillStyle(0xffffff,.9)
+        this.grenadePreview.fillCircle(x,y,3)
+      }
+      if(stopped)break
+    }
+    this.grenadePreview.lineStyle(2,0xffd84d,.95)
+    this.grenadePreview.strokeCircle(landing.x,landing.y,11)
+    this.grenadePreview.lineStyle(2,0xffd84d,.65)
+    this.grenadePreview.lineBetween(landing.x-16,landing.y,landing.x+16,landing.y)
+    this.grenadePreview.lineBetween(landing.x,landing.y-16,landing.x,landing.y+16)
+  }
+
   update(time, delta){
     const dt = Math.min(delta, 50) / 1000
 
@@ -2362,6 +2417,8 @@ class GameScene extends Phaser.Scene {
     /* Снаряды теперь создаёт авторитетный сервер. */
 
     this.updateGhostBullets(time, dt)
+    this.updateGrenadeTrajectory()
+    this.updateFog()
     this.renderPlayers(time, dt)
     if (time % 200 < 20){
       this.updateStatus()
