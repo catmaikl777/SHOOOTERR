@@ -1,0 +1,3440 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Shoot'n'cats</title>
+<link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+<style>
+  :root{
+    --joy-size: clamp(120px, 32vmin, 280px);
+  }
+
+  html,body{margin:0;padding:0;height:100%;background:#05070d;overflow:hidden;
+            touch-action:none;-webkit-user-select:none;user-select:none;
+            -webkit-tap-highlight-color:transparent;}
+  #gameWrap{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:1;}
+  #game{position:absolute;inset:0;width:100vw;height:100vh;}
+  #gameFilter{position:absolute;inset:-10%;pointer-events:none;
+              background:radial-gradient(circle at center,
+                rgba(255,245,220,.22) 0%,
+                rgba(108,146,255,.10) 27%,
+                rgba(17,51,255,.04) 42%,
+                rgba(0,0,0,.18) 58%,
+                rgba(0,0,0,.82) 100%),
+                linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.18));
+              mix-blend-mode:screen;filter:brightness(.72) contrast(1.12) saturate(1.2);
+              opacity:.9;}
+  #ui{position:fixed;inset:0;pointer-events:none;z-index:5;}
+
+  /* ====== JOYSTICKS ====== */
+  #joyL,#joyR{position:absolute;bottom:5vh;
+              width:var(--joy-size);height:var(--joy-size);
+              pointer-events:auto;}
+  #joyL{left:4vw;} #joyR{right:4vw;}
+
+  /* ====== STATUS / BONUSES / SCORES / AC ====== */
+  #status{position:fixed;top:8px;left:50%;transform:translateX(-50%);
+          color:#8b949e;font:clamp(11px,1.8vmin,16px) monospace;z-index:6;
+          text-align:center;pointer-events:none;white-space:pre;padding:4px 10px;
+          background:rgba(5,7,13,.6);border-radius:6px;}
+  #bonuses{position:fixed;top:52px;left:50%;transform:translateX(-50%);
+           color:#ffe066;font:clamp(11px,1.8vmin,15px) monospace;z-index:6;
+           text-align:center;pointer-events:none;white-space:pre;
+           background:rgba(5,7,13,.6);padding:4px 10px;border-radius:6px;
+           display:none;}
+  #scores{position:fixed;top:52px;left:12px;color:#e6edf3;
+          font:clamp(11px,1.8vmin,16px) monospace;
+          z-index:6;pointer-events:none;white-space:pre;line-height:1.6;
+          background:rgba(5,7,13,.6);padding:8px 12px;border-radius:6px;
+          min-width:140px;max-height:130px;overflow:hidden;}
+  #scores .me{color:#3fb950;font-weight:bold;}
+  #scores .dead{opacity:.5;text-decoration:line-through;}
+  #ac{position:fixed;top:96px;right:8px;color:#ff2266;
+      font:clamp(9px,1.5vmin,13px) monospace;
+      z-index:6;text-align:right;pointer-events:none;white-space:pre;opacity:.85;line-height:1.4;}
+
+  /* ====== TOP BUTTONS ====== */
+  #voteBtn{position:fixed;top:8px;right:60px;
+           padding:clamp(8px,1.5vmin,14px) clamp(12px,2.2vmin,22px);
+           font:clamp(11px,1.8vmin,15px) monospace;
+           background:#30363d;color:#e6edf3;border:0;border-radius:6px;
+           z-index:7;pointer-events:auto;}
+  #voteBtn:active{background:#484f58;}
+  #voteBtn.armed{background:#ff2266;color:#fff;font-weight:bold;
+                 box-shadow:0 0 12px #ff2266;}
+  #soundBtn{position:fixed;top:8px;right:8px;width:44px;height:44px;
+            padding:0;font-size:20px;line-height:44px;text-align:center;
+            background:#30363d;color:#e6edf3;border:0;border-radius:6px;
+            z-index:7;pointer-events:auto;cursor:pointer;}
+  #soundBtn:active{background:#484f58;}
+  #voteInfo{position:fixed;top:44px;right:8px;color:#ff2266;
+            font:clamp(10px,1.6vmin,14px) monospace;
+            z-index:7;text-align:right;pointer-events:none;white-space:pre;line-height:1.4;}
+
+  /* ====== ACTION BUTTONS ====== */
+  #actionBtns{
+    position:fixed;
+    right:4vw;
+    bottom: calc(5vh + var(--joy-size) + 12px);
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    align-items:flex-end;
+    z-index:7;
+    pointer-events:none;
+  }
+  #actionBtns > button{ pointer-events:auto; }
+
+  #dashBtn{
+    width: clamp(56px, 12vmin, 106px);
+    height: clamp(56px, 12vmin, 106px);
+    border-radius:50%;
+    border:2px solid #ff2266aa;
+    background:#ff226622;
+    color:#ff2266;
+    font:bold clamp(18px, 4vmin, 32px) monospace;
+    cursor:pointer;
+    text-shadow:0 0 8px #ff2266;
+    transition:transform .08s,background .15s,opacity .15s;
+    box-shadow:0 0 18px #ff226644, inset 0 0 12px #ff226633;
+    display:flex;align-items:center;justify-content:center;
+    padding:0;line-height:1;
+  }
+  #dashBtn:active{background:#ff226666;transform:scale(.92);}
+  #dashBtn.cooling{opacity:.35;color:#8b949e;border-color:#30363d;
+                   background:#30363d55;text-shadow:none;box-shadow:none;
+                   font-size:clamp(12px, 2.6vmin, 20px);}
+
+  #weaponBtn{
+    width: clamp(48px, 10vmin, 90px);
+    height: clamp(48px, 10vmin, 90px);
+    border-radius:50%;
+    border:2px solid #ffaa33aa;
+    background:#ffaa3322;
+    color:#ffaa33;
+    font:bold clamp(20px, 4.6vmin, 38px) monospace;
+    cursor:pointer;
+    transition:transform .08s,background .15s,color .15s,border-color .15s;
+    display:flex;align-items:center;justify-content:center;
+    padding:0;line-height:1;
+  }
+  #weaponBtn:active{transform:scale(.92);}
+  #weaponBtn.grenade{border-color:#22ccffaa;background:#22ccff22;color:#22ccff;}
+
+  /* ====== KILLFEED ====== */
+  #killfeed{position:fixed;top:200px;left:12px;
+            z-index:6;pointer-events:none;
+            font:clamp(11px,1.7vmin,15px) monospace;
+            line-height:1.5;max-width:min(320px,42vw);}
+  #killfeed .kf{background:rgba(5,7,13,.75);
+                padding:5px 10px;border-radius:6px;margin-bottom:4px;
+                border-left:3px solid #ff2266;color:#e6edf3;
+                animation:kfIn .28s cubic-bezier(.2,.9,.3,1.2);
+                box-shadow:0 0 10px #ff226633;
+                white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #killfeed .kf.mine{border-left-color:#3fb950;box-shadow:0 0 14px #3fb95066;}
+  #killfeed .kf .who{color:#3fb950;}
+  #killfeed .kf .vic{color:#f85149;}
+  #killfeed .kf .wp{opacity:.85;margin:0 6px;}
+  @keyframes kfIn{
+    from{opacity:0;transform:translateX(-24px) scale(.92);}
+    to{opacity:1;transform:translateX(0) scale(1);}
+  }
+
+  /* ====== VIGNETTE ====== */
+  #vignette{position:fixed;inset:0;pointer-events:none;z-index:4;
+            background:radial-gradient(ellipse at center,
+              rgba(0,0,0,0) 42%, rgba(255,34,102,.42) 100%);
+            opacity:0;transition:opacity .35s;}
+
+  /* ====== MEDIA: короткие экраны ====== */
+  @media (max-height: 620px){
+    :root{ --joy-size: clamp(100px, 28vmin, 200px); }
+
+    #dashBtn{
+      width: clamp(48px, 10vmin, 68px);
+      height: clamp(48px, 10vmin, 68px);
+      font-size: clamp(14px, 3vmin, 22px);
+    }
+    #weaponBtn{
+      width: clamp(42px, 8.5vmin, 58px);
+      height: clamp(42px, 8.5vmin, 58px);
+      font-size: clamp(16px, 3.6vmin, 26px);
+    }
+    #actionBtns{ gap:8px; }
+
+    #scores{
+      max-height:96px;
+      font-size:clamp(10px,1.5vmin,13px);
+      padding:6px 10px;
+    }
+    #ac{
+      top:auto;
+      bottom:8px;
+      font-size:clamp(8px,1.3vmin,11px);
+    }
+    #killfeed{ top:170px; }
+  }
+
+  @media (max-height: 450px){
+    #ac{ display:none; }
+    #killfeed{ top:150px; max-width:38vw; }
+  }
+
+  /* ====== MENU ====== */
+  #menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+        justify-content:center;background:#05070d;color:#e6edf3;
+        font-family:monospace;gap:16px;z-index:20;padding:24px;text-align:center;}
+  #menu h1{margin:0;font-size:clamp(22px,4vmin,32px);letter-spacing:2px;
+           color:#fff;text-shadow:0 0 10px #ff2266, 0 0 20px #1133ff;}
+  #menu input{padding:12px 16px;font-size:clamp(14px,2.2vmin,18px);border-radius:8px;
+              border:1px solid #30363d;background:#161b22;color:#e6edf3;
+              width:220px;text-align:center;font-family:monospace;}
+  #menu input:focus{outline:none;border-color:#1133ff;box-shadow:0 0 10px #1133ff55;}
+  #menu button{padding:14px 34px;font-size:clamp(14px,2.2vmin,18px);border-radius:8px;border:0;
+               background:#1133ff;color:#fff;font-family:monospace;font-weight:bold;
+               box-shadow:0 0 14px #1133ff;}
+  #menu button:active{background:#0020cc;}
+  #pid{font-size:clamp(10px,1.6vmin,13px);color:#8b949e;line-height:1.7;max-width:340px;word-break:break-all;}
+  #hint{font-size:clamp(11px,1.8vmin,14px);color:#8b949e;line-height:1.7;max-width:320px;}
+  #lobbyPanel{width:min(620px,92vw);display:flex;flex-direction:column;gap:10px;}
+  #lobbyHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+  #lobbyHeader strong{font-size:clamp(14px,2.2vmin,19px);}
+  #refreshLobbies{padding:9px 14px;font-size:13px;background:#30363d;box-shadow:none;}
+  #lobbyList{width:100%;max-height:34vh;overflow:auto;display:flex;flex-direction:column;gap:7px;
+             padding-right:3px;}
+  .lobbyRow{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:10px;
+            padding:10px 12px;background:#161b22;border:1px solid #30363d;border-radius:8px;
+            text-align:left;}
+  .lobbyMain{min-width:0;}
+  .lobbyName{font-weight:bold;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lobbyMeta{font-size:11px;color:#8b949e;margin-top:3px;}
+  .lobbyLock{font-size:18px;width:24px;text-align:center;}
+  .lobbyJoin{padding:8px 12px!important;font-size:12px!important;box-shadow:none!important;}
+  .lobbyJoin:disabled{opacity:.4;cursor:not-allowed;}
+  #lobbyEmpty{color:#8b949e;font-size:13px;padding:12px;}
+  #lobbyStatus{min-height:18px;color:#8b949e;font-size:12px;}
+  #createLobbyBox{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;align-items:center;}
+  #createLobbyBox input{width:145px;}
+  #createLobbyBox select{padding:12px 10px;border-radius:8px;border:1px solid #30363d;
+                         background:#161b22;color:#e6edf3;font-family:monospace;}
+  #privateJoinBox{display:none;gap:7px;justify-content:center;align-items:center;flex-wrap:wrap;}
+  #privateJoinBox input{width:145px;}
+  #privateJoinBox button{background:#22aa66;box-shadow:0 0 12px #22aa66;}
+  @media (max-height: 700px){
+    #lobbyList{max-height:27vh;}
+  }
+#fogOverlay{display:none !important;}
+</style>
+</style>
+</head>
+<body>
+<div id="gameWrap">
+  <div id="game"></div>
+  <div id="gameFilter"></div>
+</div>
+<div id="ui"><div id="joyL"></div><div id="joyR"></div></div>
+<div id="status"></div>
+<div id="bonuses"></div>
+<div id="scores"></div>
+<div id="voteInfo"></div>
+<div id="ac"></div>
+<div id="killfeed"></div>
+<div id="vignette"></div>
+<div id="fogOverlay"></div>
+<button id="voteBtn" style="display:none">VOTE HOST</button>
+<button id="soundBtn" style="display:none">🔊</button>
+<div id="actionBtns" style="display:none">
+  <button id="weaponBtn">🔫</button>
+  <button id="dashBtn">⚡</button>
+</div>
+
+<div id="menu">
+  <h1>Shoot'n'cats</h1>
+  <input id="nameInput" placeholder="твоё имя" value="" maxlength="14" />
+
+  <div id="lobbyPanel">
+    <div id="lobbyHeader">
+      <strong>🎮 Доступные лобби</strong>
+      <button id="refreshLobbies">↻ ОБНОВИТЬ</button>
+    </div>
+    <div id="lobbyList"><div id="lobbyEmpty">Загрузка лобби…</div></div>
+    <div id="lobbyStatus"></div>
+
+    <div id="createLobbyBox">
+      <input id="newLobbyName" placeholder="название лобби" maxlength="24" />
+      <select id="newLobbyType">
+        <option value="open">🌐 Открытое</option>
+        <option value="private">🔒 Закрытое</option>
+      </select>
+      <input id="newLobbyPassword" placeholder="пароль (для закрытого)" maxlength="32" style="display:none" />
+      <button id="createLobbyBtn">СОЗДАТЬ</button>
+    </div>
+
+    <div id="privateJoinBox">
+      <input id="privatePassword" type="password" placeholder="пароль лобби" maxlength="32" />
+      <button id="privateJoinBtn">ВОЙТИ</button>
+    </div>
+  </div>
+
+  <div id="hint">
+    Левый стик — движение · Правый стик — прицел и огонь<br>
+    💣 Гранаты: удерживай и отпусти (сила = дальность)<br>
+    ⚡ Рывок · бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💦 распылитель
+  </div>
+  <div id="pid">…generating identity…</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.1/dist/nipplejs.min.js"></script>
+
+<script type="module">
+/* ============================================================
+   1. КОНФИГ
+   ============================================================ */
+const CFG = {
+  W: 1800, H: 1200, CELL: 40,
+  PLAYER_R: 18, SPEED: 240,
+  BULLET_SPEED: 780, BULLET_R: 5, BULLET_LIFE: 1.4,
+  FIRE_CD: 150, MAX_HP: 100, DAMAGE: 25, RESPAWN: 2500,
+  STATE_MS: 66, INPUT_MS: 50,
+
+  PLAYER_W: 56, PLAYER_H: 48,
+  BULLET_SIZE: 14,
+
+  WALL_COLOR:  0xff2266,
+  FLOOR_COLOR: 0x1133ff,
+  FLOOR_TINT_ALPHA: 1.0,
+
+  WALL_GLOW:  true,
+  FLOOR_GLOW: true,
+
+  PICKUP_INTERVAL:   3500,
+  PICKUP_MAX:        6,
+  PICKUP_RADIUS:     24,
+  BONUS_DURATION:    20000,
+  BONUS_HP_AMOUNT:   40,
+  BONUS_FIRE_MUL:    0.5,
+  BONUS_HOMING_TURN: 0.12,
+  BONUS_HOMING_NOISE: 0.4,
+  BONUS_RICOCHET_MAX: 2,
+  BONUS_HOMING_FIRE_CD: 2000,
+
+  BONUS_SPRAYER_FIRE_CD:  700,
+  BONUS_SPRAYER_PELLETS:  7,
+  BONUS_SPRAYER_SPREAD_DEG: 30,
+  BONUS_SPRAYER_DAMAGE_MUL: 0.5,
+
+  DASH_SPEED: 720,
+  DASH_DURATION: 160,
+  DASH_CD: 1400,
+
+  GRENADE_SPEED: 750,
+  GRENADE_R: 10,
+  GRENADE_FUSE: 1500,
+  GRENADE_CD: 1800,
+  GRENADE_RADIUS: 140,
+  GRENADE_DAMAGE: 1000,
+  GRENADE_SELF_DAMAGE_MUL: 1,
+  GRENADE_DRAG_K: 1.2,
+  GRENADE_MIN_FORCE: 0.3,
+
+  SFX_MAX_DIST:      1400,
+  SFX_MASTER:        0.55,
+  AMBIENT_ENABLED:   true,
+  BGM_VOLUME:        0.35,
+}
+
+const AC_CFG = {
+  MAX_INPUT_HZ: 45, MAX_PACKET_BYTES: 512, MAX_SEQ_GAP: 300, PEER_TIMEOUT_MS: 20000,
+  SPEED_TOLERANCE: 1.35, TELEPORT_HARD: 200,
+  FIRE_TOLERANCE: 0.85, AIM_MIN_MAG: 0.05,
+  AIM_SNAP_DEG: 100, AIM_SNAP_WINDOW_MS: 40, AIM_HISTORY_MS: 2500,
+  ACCURACY_SUSPICIOUS: 0.94, ACCURACY_MIN_SHOTS: 25,
+  FOG_ENABLED: true, FOG_RADIUS: 2000,
+  STRIKE_DECAY_MS: 30000, STRIKE_KICK: 6, STRIKE_SEVERE: 2,
+  SUSPICION_KICK: 25, SUSPICION_DECAY: 0.35,
+  HISTORY_MS: 1000, MAX_REWIND_MS: 300,
+  SIG_GRACE_MS: 3000,
+}
+
+const APP_ID = 'p2p-shooter-identity-v1'
+const VOTE_DURATION_MS = 20000
+const RELAY_URL = 'wss://shoooterr.relaxdev.ru'
+
+/* ============================================================
+   2. DEBUG
+   ============================================================ */
+const DBG = {
+  enabled: true,
+  t0: performance.now(),
+  log(tag, ...args){
+    if (!this.enabled) return
+    const dt = ((performance.now() - this.t0) / 1000).toFixed(2)
+    console.log(`%c[T:${tag} +${dt}s]`, 'color:#3fb950;font-weight:bold', ...args)
+  },
+  warn(tag, ...args){
+    if (!this.enabled) return
+    const dt = ((performance.now() - this.t0) / 1000).toFixed(2)
+    console.warn(`[T:${tag} +${dt}s]`, ...args)
+  },
+  err(tag, ...args){
+    if (!this.enabled) return
+    const dt = ((performance.now() - this.t0) / 1000).toFixed(2)
+    console.error(`[T:${tag} +${dt}s]`, ...args)
+  },
+}
+
+/* ============================================================
+   3. УТИЛИТЫ
+   ============================================================ */
+function hashStr(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function colorFromId(id){const h=hashStr(id||'x')%360;return Phaser.Display.Color.HSVToRGB(h/360,0.7,1).color}
+function clamp(v,a,b){return v<a?a:v>b?b:v}
+function fnv1a(str){let h=2166136261>>>0;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)}return(h>>>0).toString(36)}
+function randomToken(len=24){const b=new Uint8Array(len);crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,'0')).join('')}
+function cleanName(s){ return String(s||'').replace(/[<>&"']/g,'').trim().slice(0,14) }
+function escapeHtml(s){
+  return String(s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]))
+}
+
+function resolveCircleRect(px,py,r,rect){
+  const cx=clamp(px,rect.x,rect.x+rect.w), cy=clamp(py,rect.y,rect.y+rect.h)
+  const dx=px-cx, dy=py-cy
+  const d2=dx*dx+dy*dy
+  if(d2>=r*r) return null
+  if(d2<0.0001){
+    const left=px-rect.x,right=rect.x+rect.w-px,top=py-rect.y,bottom=rect.y+rect.h-py
+    const m=Math.min(left,right,top,bottom)
+    if(m===left)  return {x:rect.x-r, y:py}
+    if(m===right) return {x:rect.x+rect.w+r, y:py}
+    if(m===top)   return {x:px, y:rect.y-r}
+    return {x:px, y:rect.y+rect.h+r}
+  }
+  const d=Math.sqrt(d2); const k=(r-d)/d
+  return {x:px+dx*k, y:py+dy*k}
+}
+
+function segIntersectsRect(x1,y1,x2,y2,r){
+  const dx=x2-x1, dy=y2-y1
+  let t0=0,t1=1
+  const p=[-dx,dx,-dy,dy]
+  const q=[x1-r.x, r.x+r.w-x1, y1-r.y, r.y+r.h-y1]
+  for(let i=0;i<4;i++){
+    if(p[i]===0){ if(q[i]<0) return false; continue }
+    const t=q[i]/p[i]
+    if(p[i]<0){ if(t>t1) return false; if(t>t0) t0=t }
+    else      { if(t<t0) return false; if(t<t1) t1=t }
+  }
+  return true
+}
+function lineOfSight(x1,y1,x2,y2,walls){
+  for(const w of walls){ if(segIntersectsRect(x1,y1,x2,y2,w)) return false }
+  return true
+}
+
+/* ============================================================
+   4. SOUND ENGINE
+   ============================================================ */
+class SoundEngine {
+  constructor(){
+    this.ctx = null; this.master = null; this.reverb = null
+    this.noiseBuf = null; this.ready = false
+    this.enabled = localStorage.getItem('sfx_enabled') !== '0'
+    this._ambient = null
+  }
+  init(){
+    if (this.ctx) return
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return
+    try { this.ctx = new Ctx() } catch(e){ return }
+
+    this.master = this.ctx.createGain()
+    this.master.gain.value = this.enabled ? CFG.SFX_MASTER : 0
+
+    const comp = this.ctx.createDynamicsCompressor()
+    comp.threshold.value = -16; comp.knee.value = 22
+    comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.25
+
+    this.master.connect(comp); comp.connect(this.ctx.destination)
+
+    this.reverb = this.ctx.createConvolver()
+    this.reverb.buffer = this._makeIR(1.6, 2.4)
+    const reverbGain = this.ctx.createGain()
+    reverbGain.gain.value = 0.8
+    this.reverb.connect(reverbGain)
+    reverbGain.connect(this.master)
+
+    this.noiseBuf = this._makeNoise(0.6)
+
+    this.ready = true
+    if (this.ctx.state === 'suspended') this.ctx.resume()
+  }
+  _makeNoise(dur){
+    const sr = this.ctx.sampleRate
+    const len = Math.floor(sr * dur)
+    const buf = this.ctx.createBuffer(1, len, sr)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1
+    return buf
+  }
+  _makeIR(dur, decay){
+    const sr = this.ctx.sampleRate
+    const len = Math.floor(sr * dur)
+    const buf = this.ctx.createBuffer(2, len, sr)
+    for (let c = 0; c < 2; c++){
+      const d = buf.getChannelData(c)
+      for (let i = 0; i < len; i++){
+        const t = i / len
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay)
+      }
+    }
+    return buf
+  }
+  _throttle(key, ms){
+    if (!this._thr) this._thr = {}
+    const now = performance.now()
+    if (this._thr[key] && now - this._thr[key] < ms) return false
+    this._thr[key] = now
+    return true
+  }
+  setEnabled(v){
+    this.enabled = !!v
+    localStorage.setItem('sfx_enabled', this.enabled ? '1' : '0')
+    if (this.master && this.ctx){
+      const t = this.ctx.currentTime
+      this.master.gain.cancelScheduledValues(t)
+      this.master.gain.linearRampToValueAtTime(this.enabled ? CFG.SFX_MASTER : 0, t + 0.15)
+    }
+  }
+  _tone({freq=440, freqEnd=null, type='sine', dur=0.2, vol=0.3, attack=0.005, pan=0, send=0}){
+    if (!this.ready || !this.enabled || vol <= 0.0001) return
+    const t0 = this.ctx.currentTime
+    const osc = this.ctx.createOscillator()
+    osc.type = type
+    osc.frequency.setValueAtTime(freq, t0)
+    if (freqEnd != null && freqEnd > 0){
+      try { osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), t0 + dur) } catch(e){}
+    }
+    const g = this.ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t0)
+    g.gain.linearRampToValueAtTime(Math.max(0.0002, vol), t0 + attack)
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + Math.max(attack + 0.02, dur))
+    let panner = null
+    if (this.ctx.createStereoPanner){
+      panner = this.ctx.createStereoPanner()
+      panner.pan.value = clamp(pan, -1, 1)
+    }
+    osc.connect(g)
+    if (panner){ g.connect(panner); panner.connect(this.master) }
+    else g.connect(this.master)
+    if (send > 0){
+      const s = this.ctx.createGain()
+      s.gain.value = send
+      g.connect(s); s.connect(this.reverb)
+    }
+    osc.start(t0); osc.stop(t0 + dur + 0.08)
+  }
+  _noise({dur=0.1, vol=0.3, type='lowpass', freq=2000, freqEnd=null, pan=0, send=0}){
+    if (!this.ready || !this.enabled || vol <= 0.0001) return
+    const t0 = this.ctx.currentTime
+    const src = this.ctx.createBufferSource()
+    src.buffer = this.noiseBuf
+    const filter = this.ctx.createBiquadFilter()
+    filter.type = type
+    filter.frequency.setValueAtTime(freq, t0)
+    if (freqEnd != null && freqEnd > 0){
+      try { filter.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), t0 + dur) } catch(e){}
+    }
+    const g = this.ctx.createGain()
+    g.gain.setValueAtTime(0.0001, t0)
+    g.gain.linearRampToValueAtTime(Math.max(0.0002, vol), t0 + 0.003)
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
+    let panner = null
+    if (this.ctx.createStereoPanner){
+      panner = this.ctx.createStereoPanner()
+      panner.pan.value = clamp(pan, -1, 1)
+    }
+    src.connect(filter); filter.connect(g)
+    if (panner){ g.connect(panner); panner.connect(this.master) }
+    else g.connect(this.master)
+    if (send > 0){
+      const s = this.ctx.createGain()
+      s.gain.value = send
+      g.connect(s); s.connect(this.reverb)
+    }
+    src.start(t0); src.stop(t0 + dur + 0.08)
+  }
+  shoot(kind = 'normal', pan = 0, volMul = 1){
+    if (!this._throttle('shoot', 15)) return
+    const V = 0.22 * volMul
+    if (kind === 'sprayer'){
+      this._noise({dur:0.16, vol:V*1.3, type:'lowpass', freq:2200, freqEnd:250, pan, send:0.35})
+      this._tone({freq: 150, freqEnd: 45, type:'sawtooth', dur:0.2, vol:V*1.0, pan, send:0.3})
+      this._tone({freq: 700, freqEnd: 250, type:'square', dur:0.1, vol:V*0.4, pan, send:0.2})
+      return
+    }
+    if (kind === 'homing' || kind === 'homingRicochet'){
+      this._tone({freq: 900, freqEnd: 1800, type:'triangle', dur:0.13, vol:V*0.8, pan, send:0.15})
+      this._tone({freq: 1400, freqEnd: 2200, type:'sine', dur:0.11, vol:V*0.5, pan, send:0.15})
+    } else if (kind === 'ricochet'){
+      this._noise({dur:0.08, vol:V*0.9, type:'highpass', freq:1400, pan, send:0.12})
+      this._tone({freq: 1200, freqEnd: 800, type:'square', dur:0.08, vol:V*0.35, pan, send:0.1})
+    } else {
+      this._noise({dur:0.09, vol:V, type:'lowpass', freq:3200, freqEnd:700, pan, send:0.12})
+      this._tone({freq: 200, freqEnd: 60, type:'sawtooth', dur:0.12, vol:V*0.5, pan, send:0.08})
+    }
+  }
+  grenadeThrow(pan = 0, volMul = 1){
+    if (!this._throttle('gthrow', 40)) return
+    const V = 0.22 * volMul
+    this._tone({freq: 380, freqEnd: 850, type:'sine', dur:0.16, vol:V, pan, send:0.2})
+    this._noise({dur:0.1, vol:V*0.55, type:'highpass', freq:2000, pan, send:0.15})
+  }
+  explosion(pan = 0, volMul = 1){
+    if (!this._throttle('expl', 40)) return
+    const V = 0.42 * volMul
+    this._noise({dur:0.55, vol:V, type:'lowpass', freq:1800, freqEnd:60, pan, send:0.6})
+    this._tone({freq: 130, freqEnd: 32, type:'sawtooth', dur:0.5, vol:V*0.85, pan, send:0.5})
+    this._tone({freq: 62, freqEnd: 25, type:'sine', dur:0.7, vol:V*0.7, pan, send:0.5})
+    this._noise({dur:0.32, vol:V*0.5, type:'bandpass', freq:400, pan, send:0.4})
+  }
+  weaponSwap(pan = 0, volMul = 1){
+    if (!this._throttle('wswap', 60)) return
+    const V = 0.2 * volMul
+    this._tone({freq: 700, freqEnd: 1200, type:'square', dur:0.07, vol:V, pan, send:0.15})
+    this._tone({freq: 1100, freqEnd: 500, type:'triangle', dur:0.1, vol:V*0.75, pan, send:0.15})
+  }
+  dash(pan = 0, volMul = 1){
+    if (!this._throttle('dash', 60)) return
+    const V = 0.28 * volMul
+    this._noise({dur:0.18, vol:V, type:'highpass', freq:600, freqEnd:2600, pan, send:0.25})
+    this._tone({freq: 240, freqEnd: 900, type:'sawtooth', dur:0.16, vol:V*0.7, pan, send:0.2})
+    this._tone({freq: 900, freqEnd: 1700, type:'triangle', dur:0.14, vol:V*0.45, pan, send:0.25})
+  }
+  hitPlayer(pan = 0, volMul = 1){
+    if (!this._throttle('hitp', 30)) return
+    const V = 0.28 * volMul
+    this._tone({freq: 260, freqEnd: 130, type:'square', dur:0.08, vol:V, pan, send:0.15})
+    this._noise({dur:0.06, vol:V*0.7, type:'lowpass', freq:900, pan})
+  }
+  hitShield(pan = 0, volMul = 1){
+    const V = 0.26 * volMul
+    this._tone({freq: 1600, freqEnd: 2400, type:'sine', dur:0.26, vol:V, pan, send:0.4})
+    this._tone({freq: 2400, freqEnd: 3200, type:'triangle', dur:0.2, vol:V*0.6, pan, send:0.4})
+  }
+  death(pan = 0, volMul = 1){
+    const V = 0.32 * volMul
+    this._tone({freq: 420, freqEnd: 60, type:'sawtooth', dur:0.7, vol:V, pan, send:0.5})
+    this._noise({dur:0.5, vol:V*0.6, type:'lowpass', freq:1400, freqEnd:80, pan, send:0.5})
+  }
+  kill(pan = 0, volMul = 1){
+    const V = 0.3 * volMul
+    this._tone({freq: 820, freqEnd: 160, type:'square', dur:0.22, vol:V, pan, send:0.2})
+    this._noise({dur:0.14, vol:V*0.6, type:'bandpass', freq:1800, pan, send:0.2})
+  }
+  respawn(pan = 0, volMul = 1){
+    const V = 0.2 * volMul
+    this._tone({freq: 300, freqEnd: 600, type:'sine', dur:0.3, vol:V, pan, send:0.3})
+    this._tone({freq: 450, freqEnd: 900, type:'sine', dur:0.3, vol:V*0.7, pan, send:0.3})
+    this._tone({freq: 600, freqEnd: 1200, type:'triangle', dur:0.35, vol:V*0.5, pan, send:0.3})
+  }
+  pickup(type = 'hp', pan = 0, volMul = 1){
+    const V = 0.26 * volMul
+    if (type === 'hp'){
+      this._tone({freq: 500, freqEnd: 820, type:'sine', dur:0.2, vol:V, pan, send:0.25})
+      this._tone({freq: 750, freqEnd: 1230, type:'sine', dur:0.2, vol:V*0.6, pan, send:0.25})
+    } else if (type === 'rapid'){
+      this._tone({freq: 400, freqEnd: 1600, type:'square', dur:0.2, vol:V*0.8, pan, send:0.15})
+      this._tone({freq: 800, freqEnd: 2000, type:'sine', dur:0.15, vol:V*0.5, pan, send:0.15})
+    } else if (type === 'homing'){
+      this._tone({freq: 800, freqEnd: 1400, type:'triangle', dur:0.25, vol:V, pan, send:0.3})
+      this._tone({freq: 1200, freqEnd: 1800, type:'sine', dur:0.25, vol:V*0.6, pan, send:0.3})
+    } else if (type === 'ricochet'){
+      this._tone({freq: 1200, freqEnd: 500, type:'triangle', dur:0.22, vol:V, pan, send:0.2})
+      this._tone({freq: 1600, freqEnd: 700, type:'sine', dur:0.22, vol:V*0.6, pan, send:0.2})
+    } else if (type === 'shield'){
+      this._tone({freq: 1000, freqEnd: 1800, type:'sine', dur:0.35, vol:V, pan, send:0.5})
+      this._tone({freq: 1500, freqEnd: 2400, type:'triangle', dur:0.3, vol:V*0.7, pan, send:0.5})
+    } else if (type === 'sprayer'){
+      this._tone({freq: 250, freqEnd: 900, type:'sawtooth', dur:0.3, vol:V*1.0, pan, send:0.3})
+      this._noise({dur:0.2, vol:V*0.6, type:'bandpass', freq:900, pan, send:0.3})
+      this._tone({freq: 500, freqEnd: 1200, type:'triangle', dur:0.25, vol:V*0.5, pan, send:0.3})
+    } else {
+      this._tone({freq: 700, freqEnd: 1100, type:'sine', dur:0.2, vol:V, pan, send:0.2})
+    }
+  }
+  pickupSpawn(pan = 0, volMul = 1){
+    const V = 0.07 * volMul
+    this._tone({freq: 1200, freqEnd: 900, type:'sine', dur:0.14, vol:V, pan, send:0.25})
+  }
+  ricochetTick(pan = 0, volMul = 1){
+    if (!this._throttle('ric', 40)) return
+    const V = 0.11 * volMul
+    this._tone({freq: 2000, freqEnd: 1400, type:'sine', dur:0.06, vol:V, pan, send:0.15})
+  }
+  join(pan = 0, volMul = 1){
+    const V = 0.16 * volMul
+    this._tone({freq: 500, freqEnd: 900, type:'sine', dur:0.2, vol:V, pan, send:0.2})
+    this._tone({freq: 750, freqEnd: 1200, type:'sine', dur:0.2, vol:V*0.6, pan, send:0.2})
+  }
+  leave(pan = 0, volMul = 1){
+    const V = 0.15 * volMul
+    this._tone({freq: 900, freqEnd: 400, type:'sine', dur:0.25, vol:V, pan, send:0.2})
+  }
+  startAmbient(){
+    if (!this.ready || this._ambient || !CFG.AMBIENT_ENABLED) return
+    const ctx = this.ctx
+    const now = ctx.currentTime
+    const g = ctx.createGain()
+    g.gain.value = 0.0001
+    g.gain.linearRampToValueAtTime(0.045, now + 3)
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'lowpass'; filter.frequency.value = 260; filter.Q.value = 0.8
+    const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 55
+    const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 82.5
+    const o3 = ctx.createOscillator(); o3.type = 'triangle'; o3.frequency.value = 110
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07
+    const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.018
+    lfo.connect(lfoGain); lfoGain.connect(g.gain)
+    o1.connect(filter); o2.connect(filter); o3.connect(filter)
+    filter.connect(g); g.connect(this.master)
+    o1.start(); o2.start(); o3.start(); lfo.start()
+    this._ambient = { g, o1, o2, o3, lfo, filter }
+  }
+}
+
+/* ============================================================
+   5. IDENTITY
+   ============================================================ */
+class Identity {
+  constructor(){
+    this.ready=false; this.mode='none'; this.pubHash=null
+    this.keyPair=null; this.pubJwk=null
+  }
+  _timeout(promise, ms, label){
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout:' + (label || 'op'))), ms)
+      )
+    ])
+  }
+  _fallback(reason){
+    let stored = localStorage.getItem('p2p_fallback_id')
+    if (!stored){
+      stored = randomToken(12)
+      localStorage.setItem('p2p_fallback_id', stored)
+    }
+    this.pubHash = 'fb_' + stored
+    this.mode = 'fallback'
+    this.ready = true
+    DBG.warn('ID', 'fallback mode:', reason)
+  }
+  async init(){
+    if (!(window.isSecureContext && window.crypto && crypto.subtle)) {
+      this._fallback('no secure context / no crypto.subtle')
+      return
+    }
+    const storeKey = 'p2p_ecdsa_key'
+    let stored = null
+    try { stored = JSON.parse(localStorage.getItem(storeKey)) } catch {}
+    if (stored && (!stored.priv || !stored.pub)){
+      try { localStorage.removeItem(storeKey) } catch {}
+      stored = null
+    }
+    try {
+      if (stored){
+        this.keyPair = {
+          privateKey: await this._timeout(
+            crypto.subtle.importKey('jwk', stored.priv,
+              {name:'ECDSA', namedCurve:'P-256'}, true, ['sign']),
+            2000, 'importPriv'
+          ),
+          publicKey: await this._timeout(
+            crypto.subtle.importKey('jwk', stored.pub,
+              {name:'ECDSA', namedCurve:'P-256'}, true, ['verify']),
+            2000, 'importPub'
+          ),
+        }
+        this.pubJwk = stored.pub
+      } else {
+        this.keyPair = await this._timeout(
+          crypto.subtle.generateKey(
+            {name:'ECDSA', namedCurve:'P-256'}, true, ['sign','verify']),
+          3000, 'generateKey'
+        )
+        this.pubJwk = await this._timeout(
+          crypto.subtle.exportKey('jwk', this.keyPair.publicKey),
+          2000, 'exportPub'
+        )
+        const privJwk = await this._timeout(
+          crypto.subtle.exportKey('jwk', this.keyPair.privateKey),
+          2000, 'exportPriv'
+        )
+        try {
+          localStorage.setItem(storeKey, JSON.stringify({priv: privJwk, pub: this.pubJwk}))
+        } catch(e){}
+      }
+      const hex = await this._timeout(this._sha256hex(JSON.stringify(this.pubJwk)), 2000, 'sha256')
+      this.pubHash = hex.slice(0,16)
+      this.mode = 'crypto'
+      this.ready = true
+    } catch (e) {
+      try { localStorage.removeItem(storeKey) } catch {}
+      this._fallback(e.message || String(e))
+    }
+  }
+  async _sha256hex(str){
+    const buf = new TextEncoder().encode(str)
+    const h = await crypto.subtle.digest('SHA-256', buf)
+    return Array.from(new Uint8Array(h), b => b.toString(16).padStart(2,'0')).join('')
+  }
+  async sign(str){
+    if (this.mode !== 'crypto' || !crypto?.subtle) return 'no-crypto'
+    try {
+      const buf = new TextEncoder().encode(str)
+      const sig = await this._timeout(
+        crypto.subtle.sign({name:'ECDSA', hash:'SHA-256'}, this.keyPair.privateKey, buf),
+        2000, 'sign'
+      )
+      return btoa(String.fromCharCode(...new Uint8Array(sig)))
+    } catch(e){ return 'no-crypto' }
+  }
+  async verify(pubJwk, str, sigB64){
+    if (this.mode !== 'crypto' || !crypto?.subtle) return false
+    if (!pubJwk || !sigB64) return false
+    try {
+      const pub = await this._timeout(
+        crypto.subtle.importKey('jwk', pubJwk,
+          {name:'ECDSA', namedCurve:'P-256'}, true, ['verify']),
+        2000, 'importVerify'
+      )
+      const buf = new TextEncoder().encode(str)
+      const sig = Uint8Array.from(atob(sigB64), c => c.charCodeAt(0))
+      return await this._timeout(
+        crypto.subtle.verify({name:'ECDSA', hash:'SHA-256'}, pub, sig, buf),
+        2000, 'verify'
+      )
+    } catch { return false }
+  }
+}
+
+/* ============================================================
+   6. АНТИЧИТ
+   ============================================================ */
+const AC_LOG = []
+function acLog(msg){
+  AC_LOG.unshift(msg)
+  if (AC_LOG.length > 6) AC_LOG.pop()
+  const el = document.getElementById('ac')
+  if (el) el.textContent = AC_LOG.join('\n')
+  console.log('[AC]', msg)
+}
+
+class AntiCheat {
+  constructor(scene){
+    this.scene = scene
+    this.peers = new Map()
+    this.bans = new Set()
+    this.persistentBans = new Set()
+    this.myToken = null
+    this.seq = 0
+    this.histories = new Map()
+    this.identity = null
+    this.loadPersistentBans()
+  }
+  loadPersistentBans(){
+    try {
+      const raw = localStorage.getItem('p2p_bans_' + APP_ID)
+      if (raw) {
+        const arr = JSON.parse(raw)
+        if (Array.isArray(arr)) for (const h of arr) this.persistentBans.add(h)
+      }
+    } catch {}
+  }
+  savePersistentBans(){
+    try { localStorage.setItem('p2p_bans_' + APP_ID, JSON.stringify([...this.persistentBans])) } catch {}
+  }
+  isPersistentlyBanned(pubHash){ return !!(pubHash && this.persistentBans.has(pubHash)) }
+  addPersistentBan(pubHash){ if (!pubHash) return; this.persistentBans.add(pubHash); this.savePersistentBans() }
+  ensure(id){
+    let p = this.peers.get(id)
+    if (!p) {
+      p = { strikes:0, lastStrike:0, suspicion:0, lastUpdate:performance.now(),
+            inputTimes:[], lastSeq:-1, token:null, sigRequiredAt:0,
+            lastFire:0, shotsFired:0, shotsHit:0,
+            aimHistory:[], lastPos:null, lastPosT:0, rtt:0,
+            pubHash:null, pubJwk:null, verified:false, nonce:null }
+      this.peers.set(id, p)
+    }
+    return p
+  }
+  remove(id){ this.peers.delete(id); this.histories.delete(id) }
+  strike(id, reason, w=1){
+    const p = this.ensure(id)
+    p.strikes += w; p.lastStrike = performance.now()
+    acLog(`⚡ ${id.slice(0,6)} ${reason} (${p.strikes}/${AC_CFG.STRIKE_KICK})`)
+    if (p.strikes >= AC_CFG.STRIKE_KICK) { this.ban(id, reason); return false }
+    return true
+  }
+  ban(id, reason, persistent=false){
+    if (this.bans.has(id)) return
+    this.bans.add(id)
+    const p = this.peers.get(id)
+    if (persistent && p && p.pubHash) this.addPersistentBan(p.pubHash)
+    acLog(`⛔ BAN ${id.slice(0,6)}: ${reason}`)
+    this.scene.onAntiCheatBan?.(id, reason, persistent)
+  }
+  decay(id, dtSec){
+    const p = this.peers.get(id); if (!p) return
+    const now = performance.now()
+    if (p.strikes > 0 && now - p.lastStrike > AC_CFG.STRIKE_DECAY_MS){ p.strikes--; p.lastStrike = now }
+    if (p.suspicion > 0) p.suspicion = Math.max(0, p.suspicion - AC_CFG.SUSPICION_DECAY * dtSec)
+  }
+  issueToken(id){
+    const p = this.ensure(id)
+    p.token = randomToken(16)
+    p.sigRequiredAt = performance.now() + AC_CFG.SIG_GRACE_MS
+    return p.token
+  }
+  setMyToken(tok){ this.myToken = tok }
+  sign(fields){
+    const s = `${this.myToken}|${this.seq}|${fields.m[0]}|${fields.m[1]}|${fields.a[0]}|${fields.a[1]}|${fields.f}`
+    return fnv1a(s)
+  }
+  verify(id, payload){
+    const p = this.peers.get(id); if (!p || !p.token) return false
+    const s = `${p.token}|${payload.seq}|${payload.m[0]}|${payload.m[1]}|${payload.a[0]}|${payload.a[1]}|${payload.f}`
+    return fnv1a(s) === payload.sig
+  }
+  validateInput(id, data){
+    if (this.bans.has(id)) return false
+    const p = this.ensure(id)
+    const now = performance.now()
+    p.lastUpdate = now
+    let size = 0
+    try { size = JSON.stringify(data).length } catch { return this.strike(id,'unserializable',AC_CFG.STRIKE_SEVERE) }
+    if (size > AC_CFG.MAX_PACKET_BYTES) return this.strike(id, `oversized`, AC_CFG.STRIKE_SEVERE)
+    if (!data || typeof data !== 'object') return this.strike(id, 'not object', AC_CFG.STRIKE_SEVERE)
+    if (!this.pair(data.m) || !this.pair(data.a)) return this.strike(id, 'bad vectors', AC_CFG.STRIKE_SEVERE)
+    if (typeof data.f !== 'number' || (data.f !== 0 && data.f !== 1)) return this.strike(id, 'bad fire', AC_CFG.STRIKE_SEVERE)
+    if (typeof data.seq !== 'number' || !Number.isFinite(data.seq)) return this.strike(id, 'no seq', AC_CFG.STRIKE_SEVERE)
+    if (data.w !== undefined && data.w !== 0 && data.w !== 1) return this.strike(id, 'bad weapon', AC_CFG.STRIKE_SEVERE)
+    if (data.af !== undefined){
+      if (typeof data.af !== 'number' || !Number.isFinite(data.af))
+        return this.strike(id, 'bad aimforce', AC_CFG.STRIKE_SEVERE)
+      if (data.af < 0 || data.af > 1.5)
+        return this.strike(id, 'aimforce range', AC_CFG.STRIKE_SEVERE)
+    }
+    if (data.tseq !== undefined){
+      if (typeof data.tseq !== 'number' || !Number.isFinite(data.tseq) || data.tseq < 0 || data.tseq > 1e9)
+        return this.strike(id, 'bad tseq', AC_CFG.STRIKE_SEVERE)
+    }
+    p.inputTimes.push(now)
+    while (p.inputTimes.length && now - p.inputTimes[0] > 1000) p.inputTimes.shift()
+    if (p.inputTimes.length > AC_CFG.MAX_INPUT_HZ) return this.strike(id, `flood`, AC_CFG.STRIKE_SEVERE)
+    if (data.seq <= p.lastSeq) return this.strike(id, `replay`, AC_CFG.STRIKE_SEVERE)
+    if (p.lastSeq >= 0 && data.seq > p.lastSeq + AC_CFG.MAX_SEQ_GAP) return this.strike(id, `seq jump`, 1)
+    p.lastSeq = data.seq
+    if (p.token && now > p.sigRequiredAt && !this.verify(id, data)) return this.strike(id, 'bad signature', AC_CFG.STRIKE_SEVERE)
+    const clip = v => {
+      const L = Math.hypot(v[0], v[1])
+      if (L > 1.05){ v[0] /= L; v[1] /= L }
+      if (L < AC_CFG.AIM_MIN_MAG && v === data.a){ v[0] = 1; v[1] = 0 }
+      if (L < 0.001){ v[0] = 0; v[1] = 0 }
+    }
+    clip(data.m); clip(data.a)
+    return true
+  }
+  pair(v){
+    return Array.isArray(v) && v.length === 2 &&
+      Number.isFinite(v[0]) && Number.isFinite(v[1]) &&
+      Math.abs(v[0]) <= 10 && Math.abs(v[1]) <= 10
+  }
+  validateMovement(id, prev, next, dt, speedLimit){
+    if (!prev) return { x: next.x, y: next.y }
+    const dx = next.x - prev.x, dy = next.y - prev.y
+    const dist = Math.hypot(dx, dy)
+    if (dist > AC_CFG.TELEPORT_HARD) {
+      this.strike(id, `teleport`, AC_CFG.STRIKE_SEVERE)
+      return { x: prev.x, y: prev.y }
+    }
+    const maxD = (speedLimit || CFG.SPEED) * dt * AC_CFG.SPEED_TOLERANCE + 12
+    if (dist > maxD) {
+      this.strike(id, `speed`, 1)
+      const k = maxD / dist
+      return { x: prev.x + dx*k, y: prev.y + dy*k }
+    }
+    return { x: next.x, y: next.y }
+  }
+  validateFire(id, now, fireCd){
+    const p = this.ensure(id)
+    const min = fireCd * AC_CFG.FIRE_TOLERANCE
+    if (now - p.lastFire < min) return this.strike(id, `rapid fire`, 1)
+    p.lastFire = now
+    return true
+  }
+  recordAim(id, ax, ay, now){
+    const p = this.ensure(id)
+    const last = p.aimHistory[p.aimHistory.length-1]
+    if (last){
+      const dt = now - last.t
+      if (dt < AC_CFG.AIM_SNAP_WINDOW_MS){
+        const dot = last.ax*ax + last.ay*ay
+        const ang = Math.acos(Math.max(-1, Math.min(1, dot))) * 180/Math.PI
+        if (ang > AC_CFG.AIM_SNAP_DEG) p.suspicion += 1.5
+      }
+    }
+    p.aimHistory.push({ ax, ay, t: now })
+    while (p.aimHistory.length && now - p.aimHistory[0].t > AC_CFG.AIM_HISTORY_MS) p.aimHistory.shift()
+  }
+  recordShot(id, hit){
+    const p = this.ensure(id)
+    p.shotsFired++
+    if (hit) p.shotsHit++
+    if (p.shotsFired >= AC_CFG.ACCURACY_MIN_SHOTS){
+      const acc = p.shotsHit / p.shotsFired
+      if (acc > AC_CFG.ACCURACY_SUSPICIOUS) p.suspicion += 0.6
+    }
+  }
+  computeVisible(forId, all, walls, localPos){
+    if (!AC_CFG.FOG_ENABLED) return Object.keys(all)
+    const R2 = AC_CFG.FOG_RADIUS * AC_CFG.FOG_RADIUS
+    const out = []
+    for (const id in all){
+      if (id === forId){ out.push(id); continue }
+      const p = all[id]
+      const dx = p.x - localPos.x, dy = p.y - localPos.y
+      if (dx*dx + dy*dy > R2) continue
+      if (lineOfSight(localPos.x, localPos.y, p.x, p.y, walls)) out.push(id)
+    }
+    return out
+  }
+  recordPosition(id, x, y){
+    let h = this.histories.get(id)
+    if (!h){ h = []; this.histories.set(id, h) }
+    const now = performance.now()
+    h.push({ x, y, t: now })
+    const cut = now - AC_CFG.HISTORY_MS
+    while (h.length && h[0].t < cut) h.shift()
+  }
+  rewindPosition(id, backMs){
+    const h = this.histories.get(id)
+    if (!h || h.length === 0) return null
+    const target = performance.now() - Math.min(backMs, AC_CFG.MAX_REWIND_MS)
+    let lo = 0, hi = h.length - 1
+    while (lo < hi){ const mid = (lo + hi) >> 1; if (h[mid].t < target) lo = mid+1; else hi = mid }
+    return h[lo]
+  }
+  tick(dtSec){
+    const now = performance.now()
+    for (const [id, p] of this.peers){
+      this.decay(id, dtSec)
+      const idle = now - p.lastUpdate
+      if (idle > AC_CFG.PEER_TIMEOUT_MS){
+        if (!p._idleLogged){ p._idleLogged = true; acLog(`⏸ ${id.slice(0,6)} idle`) }
+      } else if (p._idleLogged){ p._idleLogged = false; acLog(`▶ ${id.slice(0,6)} resumed`) }
+    }
+  }
+}
+
+/* ============================================================
+   7. MAP
+   ============================================================ */
+const SPAWNS = [
+  {x:120,y:120},{x:CFG.W-120,y:120},
+  {x:120,y:CFG.H-120},{x:CFG.W-120,y:CFG.H-120},
+  {x:CFG.W/2,y:120},{x:CFG.W/2,y:CFG.H-120},
+]
+function generateWalls(seedStr){
+  const rng = mulberry32(hashStr(seedStr))
+  const cs = CFG.CELL
+  const cols = Math.floor(CFG.W/cs), rows = Math.floor(CFG.H/cs)
+  const used = new Set(), out = []
+  const push = (c,r) => { const k=c+','+r; if (used.has(k)) return; used.add(k); out.push({x:c*cs,y:r*cs,w:cs,h:cs}) }
+  for (let c=0;c<cols;c++){ push(c,0); push(c,rows-1) }
+  for (let r=0;r<rows;r++){ push(0,r); push(cols-1,r) }
+  const nearSpawn = (x,y) => { for (const s of SPAWNS){ if (Math.abs(s.x-x)<140 && Math.abs(s.y-y)<140) return true } return false }
+  for (let i=0;i<60;i++){
+    const c = 2 + Math.floor(rng()*(cols-4))
+    const r = 2 + Math.floor(rng()*(rows-4))
+    const len = 1 + Math.floor(rng()*3)
+    const horiz = rng() < 0.5
+    for (let j=0;j<len;j++){
+      const cc = horiz ? c+j : c, rr = horiz ? r : r+j
+      if (cc >= cols-1 || rr >= rows-1) break
+      if (nearSpawn(cc*cs+cs/2, rr*cs+cs/2)) continue
+      push(cc, rr)
+    }
+  }
+  return out
+}
+
+/* ============================================================
+   8. BOOT SCENE
+   ============================================================ */
+class BootScene extends Phaser.Scene {
+  constructor(){ super('Boot') }
+  preload(){
+    this.load.image('player', 'player.png')
+    this.load.image('bullet', 'bullet.png')
+    this.load.image('wall',   'wall.png')
+    this.load.image('floor',  'floor.png')
+    this.load.audio('bgm', ['music.mp3', 'music.ogg'])
+
+    this.load.on('loaderror', file => {
+      DBG.warn('BOOT', 'not found:', file.key)
+      if (file.key !== 'bgm') this.generateStub(file.key)
+    })
+  }
+  generateStub(key){
+    if (this.textures.exists(key)) return
+    const g = this.make.graphics({x:0,y:0,add:false})
+    if (key === 'player'){ g.fillStyle(0xffffff,1); g.fillCircle(24,24,18); g.fillRect(38,18,18,12); g.generateTexture('player',56,48) }
+    else if (key === 'bullet'){ g.fillStyle(0xffe066,1); g.fillCircle(6,6,5); g.generateTexture('bullet',12,12) }
+    else if (key === 'wall'){ g.fillStyle(0xffffff,1); g.fillRect(0,0,40,40); g.generateTexture('wall',40,40) }
+    else if (key === 'floor'){ g.fillStyle(0xffffff,1); g.fillRect(0,0,80,80); g.generateTexture('floor',80,80) }
+    g.destroy()
+  }
+  create(){ this.scene.start('Game') }
+}
+
+/* ============================================================
+   9. ИГРОВАЯ СЦЕНА
+   ============================================================ */
+class GameScene extends Phaser.Scene {
+  constructor(){ super('Game') }
+
+  create(){
+    this.roomId = this.registry.get('roomId') || 'arena1'
+    this.roomPassword = this.registry.get('roomPassword') || ''
+    this.lobbyName = this.registry.get('lobbyName') || this.roomId
+    this.identity = this.registry.get('identity')
+    this.myName = this.registry.get('playerName') || 'anon'
+    this.sfx = this.registry.get('sfx')
+
+    this.floorSprite = this.add.tileSprite(0, 0, CFG.W, CFG.H, 'floor')
+      .setOrigin(0).setDepth(-20).setTint(CFG.FLOOR_COLOR).setAlpha(CFG.FLOOR_TINT_ALPHA)
+    if (CFG.FLOOR_GLOW){
+      this.add.rectangle(CFG.W/2, CFG.H/2, CFG.W, CFG.H, CFG.FLOOR_COLOR, 0.12)
+        .setBlendMode(Phaser.BlendModes.ADD).setDepth(-19)
+    }
+
+    this.wallRects = generateWalls(this.roomId)
+    this.wallSprites = []
+    if (CFG.WALL_GLOW){
+      for (const r of this.wallRects){
+        this.add.image(r.x + r.w/2, r.y + r.h/2, 'wall')
+          .setDisplaySize(r.w + 14, r.h + 14).setTintFill(CFG.WALL_COLOR)
+          .setAlpha(0.3).setBlendMode(Phaser.BlendModes.ADD).setDepth(-11)
+      }
+    }
+    for (const r of this.wallRects){
+      this.wallSprites.push(this.add.image(r.x, r.y, 'wall')
+        .setOrigin(0).setDepth(-10).setDisplaySize(r.w, r.h).setTintFill(CFG.WALL_COLOR))
+    }
+
+    this.cameras.main.setBounds(0, 0, CFG.W, CFG.H)
+    this.cameras.main.setBackgroundColor('#05070d')
+    this.updateCameraZoom()
+    this.scale.on('resize', () => this.updateCameraZoom())
+
+    this._setupMusic()
+
+    this.views = {}
+    this.ghostBullets = {}
+    this.inputs = {}
+    this.worldPlayers = {}
+    this.bullets = []
+    this.bulletSeq = 0
+    this.lastStateSent = 0
+    this.lastMetaSent = 0
+    this.lastInputSent = 0
+    this.lastAcTick = 0
+    this._lastPing = 0
+    this._lastVisibleCalc = 0
+    this._visibleCache = {}
+    this.scores = {}
+    this.peerNames = {}
+    this._lastLocalShot = 0
+    this._lastNameSent = 0
+
+    this.pickups = []
+    this.pickupSprites = {}
+    this.pickupSeq = 0
+    this.lastPickupSpawn = 0
+
+    this.localBonuses = [0, 0, 0, 0, 0]
+
+    this.dash = { until:0, cdUntil:0, dirX:1, dirY:0 }
+    this.dashSeq = 0
+
+    this.weapon = 'rifle'
+    this.aimForce = 0.5
+    /* 🆕 счётчик брошенных гранат */
+    this.throwSeq = 0
+    this.lastLocalThrow = 0
+    this.grenadePreview = this.add.graphics().setDepth(14)
+    this.fogOverlay = document.getElementById('fogOverlay')
+
+    this.hostBlacklist = new Set()
+    this.votes = new Map()
+    this.voteActive = false
+    this.voteTarget = null
+    this.voteDeadline = 0
+
+    this.ws = null
+    this.peers = new Set()
+    this.isHost = false
+    this.myPeerId = null
+    this.hasBecomeClient = false
+    this.serverHostId = null
+    this.reconnectAttempts = 0
+
+    this.local = { x:SPAWNS[0].x, y:SPAWNS[0].y, aimX:1, aimY:0, hp:CFG.MAX_HP, dead:false, score:0 }
+    this.predicted = { x:this.local.x, y:this.local.y }
+
+    this.ac = new AntiCheat(this)
+    this.ac.identity = this.identity
+
+    this.statusEl = document.getElementById('status')
+    this.bonusesEl = document.getElementById('bonuses')
+    this.scoresEl = document.getElementById('scores')
+    this.voteBtn  = document.getElementById('voteBtn')
+    this.voteInfo = document.getElementById('voteInfo')
+    this.soundBtn = document.getElementById('soundBtn')
+    this.voteBtn.style.display = ''
+    this.soundBtn.style.display = ''
+    this.soundBtn.textContent = this.sfx.enabled ? '🔊' : '🔇'
+    this.voteBtn.addEventListener('click', ()=> this.onVoteClick())
+    this.soundBtn.addEventListener('click', ()=> this.toggleSound())
+
+    this.killfeedEl = document.getElementById('killfeed')
+    this.vignetteEl = document.getElementById('vignette')
+
+    this.actionBtns = document.getElementById('actionBtns')
+    this.dashBtn = document.getElementById('dashBtn')
+    this.weaponBtn = document.getElementById('weaponBtn')
+    this.actionBtns.style.display = ''
+    this._bindDashButton()
+    this._bindWeaponButton()
+
+    this.setupJoysticks()
+
+    this.myPeerId = 'local_' + randomToken(4)
+    this.peerNames[this.myPeerId] = this.myName
+    this.createView(this.myPeerId)
+
+    this.setupNetwork()
+
+    this.time.delayedCall(1500, ()=>{
+      if (!this.isHost) return
+      const angle = Math.random() * Math.PI * 2
+      let x, y, tries = 0
+      do {
+        x = CFG.W/2 + Math.cos(angle) * (200 + Math.random()*300)
+        y = CFG.H/2 + Math.sin(angle) * (200 + Math.random()*300)
+        tries++
+      } while (this.isInsideWall(x, y, 40) && tries < 40)
+      if (tries < 40){
+        this.pickups.push({ id:'pk_'+(++this.pickupSeq), type:'sprayer', x, y })
+        const sp = this._spatial(x, y, 0.6)
+        this.sfx.pickupSpawn(sp.pan, sp.vol)
+      }
+    })
+  }
+
+  /* =========== DASH =========== */
+  _bindDashButton(){
+    const fire = (e) => {
+      if (e){ e.preventDefault(); e.stopPropagation() }
+      this.tryDash()
+    }
+    this.dashBtn.addEventListener('pointerdown', fire)
+    this.dashBtn.addEventListener('contextmenu', e => e.preventDefault())
+  }
+
+  tryDash(){
+    const now = performance.now()
+    if (this.local.dead) return
+    if (now < this.dash.cdUntil) return
+
+    let dx = this.moveVec.x, dy = this.moveVec.y
+    if (Math.hypot(dx, dy) < 0.2){
+      dx = this.aimVec.x; dy = this.aimVec.y
+    }
+    const len = Math.hypot(dx, dy) || 1
+    this.dash.dirX = dx/len
+    this.dash.dirY = dy/len
+    this.dash.until = now + CFG.DASH_DURATION
+    this.dash.cdUntil = now + CFG.DASH_CD
+    this.dashSeq++
+
+    this.sfx.dash(0, 1)
+    this.cameras.main.shake(90, 0.0035)
+    this._spawnDashTrail()
+  }
+
+  _spawnDashTrail(){
+    const me = this.views[this.myPeerId]
+    if (!me) return
+    const g = this.add.graphics().setDepth(8)
+    g.fillStyle(0xff2266, 0.6)
+    g.fillCircle(me.sprite.x - this.dash.dirX * 6,
+                 me.sprite.y - this.dash.dirY * 6, CFG.PLAYER_R * 0.85)
+    this.tweens.add({
+      targets: g, alpha: 0, scale: 1.6, duration: 260,
+      onComplete: () => g.destroy(),
+    })
+  }
+
+  updateDashButton(){
+    if (!this.dashBtn) return
+    const now = performance.now()
+    const onCd = now < this.dash.cdUntil
+    const dead = this.local.dead
+    const locked = onCd || dead
+    this.dashBtn.classList.toggle('cooling', locked)
+    if (onCd){
+      this.dashBtn.textContent = Math.ceil((this.dash.cdUntil - now)/1000) + 's'
+    } else {
+      this.dashBtn.textContent = '⚡'
+    }
+  }
+
+  /* =========== WEAPON SWAP =========== */
+  _bindWeaponButton(){
+    const swap = (e) => {
+      if (e){ e.preventDefault(); e.stopPropagation() }
+      this.toggleWeapon()
+    }
+    this.weaponBtn.addEventListener('pointerdown', swap)
+    this.weaponBtn.addEventListener('contextmenu', e => e.preventDefault())
+    this.updateWeaponButton()
+  }
+
+  toggleWeapon(){
+    if (this.local.dead) return
+    this.weapon = this.weapon === 'rifle' ? 'grenade' : 'rifle'
+    this._lastLocalShot = 0
+    this.sfx.weaponSwap(0, 1)
+    this.updateWeaponButton()
+  }
+
+  updateWeaponButton(){
+    if (!this.weaponBtn) return
+    if (this.weapon === 'rifle'){
+      this.weaponBtn.textContent = '🔫'
+      this.weaponBtn.classList.remove('grenade')
+    } else {
+      this.weaponBtn.textContent = '💣'
+      this.weaponBtn.classList.add('grenade')
+    }
+  }
+
+  /* =========== KILLFEED =========== */
+  addKillFeed(killerName, victimName, isMine, weaponEmoji){
+    if (!this.killfeedEl) return
+    const el = document.createElement('div')
+    el.className = 'kf' + (isMine ? ' mine' : '')
+    el.innerHTML =
+      `<span class="who">${escapeHtml(killerName)}</span>` +
+      `<span class="wp">${weaponEmoji}</span>` +
+      `<span class="vic">${escapeHtml(victimName)}</span>`
+    this.killfeedEl.appendChild(el)
+    while (this.killfeedEl.children.length > 5){
+      this.killfeedEl.removeChild(this.killfeedEl.firstChild)
+    }
+    setTimeout(() => {
+      if (!el.parentNode) return
+      el.style.transition = 'opacity .4s, transform .4s'
+      el.style.opacity = '0'
+      el.style.transform = 'translateX(-24px)'
+      setTimeout(() => el.remove(), 450)
+    }, 5000)
+  }
+
+  flashVignette(){
+    if (!this.vignetteEl) return
+    this.vignetteEl.style.transition = 'opacity .08s'
+    this.vignetteEl.style.opacity = '1'
+    setTimeout(() => {
+      this.vignetteEl.style.transition = 'opacity .6s'
+      this.vignetteEl.style.opacity = '0'
+    }, 110)
+  }
+
+  /* =========== МУЗЫКА =========== */
+  _setupMusic(){
+    try {
+      if (!this.cache.audio.exists('bgm')){
+        DBG.warn('BGM', 'music.mp3 не найден')
+        return
+      }
+      this.bgm = this.sound.add('bgm', { loop: true, volume: CFG.BGM_VOLUME })
+      const tryPlay = () => {
+        if (!this.sfx.enabled) return
+        if (this.bgm && !this.bgm.isPlaying){
+          try { this.bgm.play() } catch(e){}
+        }
+      }
+      const isLocked = this.sound && this.sound.locked
+      if (isLocked) this.sound.once('unlocked', tryPlay)
+      else tryPlay()
+    } catch(e){}
+  }
+
+  toggleSound(){
+    this.sfx.setEnabled(!this.sfx.enabled)
+    this.soundBtn.textContent = this.sfx.enabled ? '🔊' : '🔇'
+    if (this.bgm){
+      try {
+        if (this.sfx.enabled){
+          if (!this.bgm.isPlaying) this.bgm.play()
+          if (typeof this.bgm.setVolume === 'function') this.bgm.setVolume(CFG.BGM_VOLUME)
+        } else {
+          this.bgm.pause()
+        }
+      } catch(e){}
+    }
+  }
+
+  updateCameraZoom(){
+    const w = this.scale.width, h = this.scale.height
+    const shortSide = Math.min(w, h)
+    const worldView = shortSide < 600 ? 450 : 700
+    const zoom = clamp(shortSide / worldView, 0.9, 2.5)
+    this.cameras.main.setZoom(zoom)
+  }
+
+  setupJoysticks(){
+    this.moveVec = { x:0, y:0 }
+    this.aimVec = { x:1, y:0 }
+    this.firing = false
+
+    const joyL = nipplejs.create({
+      zone: document.getElementById('joyL'), mode:'static',
+      position:{left:'50%',top:'50%'}, color:'#1133ff', size:110, threshold:0.1,
+    })
+    joyL.on('move', (e,d)=>{
+      const f = Math.min(d.force,1)
+      this.moveVec.x = Math.cos(d.angle.radian)*f
+      this.moveVec.y = -Math.sin(d.angle.radian)*f
+    })
+    joyL.on('end', ()=>{ this.moveVec.x=0; this.moveVec.y=0 })
+
+    const joyR = nipplejs.create({
+      zone: document.getElementById('joyR'), mode:'static',
+      position:{left:'50%',top:'50%'}, color:'#ff2266', size:110, threshold:0.1,
+    })
+    joyR.on('start', ()=>{ this.firing = true })
+    joyR.on('move', (e,d)=>{
+      const f = Math.min(d.force,1)
+      const ax = Math.cos(d.angle.radian), ay = -Math.sin(d.angle.radian)
+      if (f > 0.15){
+        this.aimVec.x = ax; this.aimVec.y = ay
+        this.aimForce = f
+      }
+      this.firing = f > 0.25
+    })
+    /* 🆕 БРОСОК ПО ОТПУСКАНИЮ */
+    joyR.on('end', ()=>{
+      const wasFiring = this.firing
+      this.firing = false
+      if (this.grenadePreview) this.grenadePreview.clear()
+      if (wasFiring && this.weapon === 'grenade' && !this.local.dead){
+        this._doGrenadeThrow()
+      }
+    })
+  }
+
+  /* 🆕 выполнить бросок гранаты (на отпускании стика) */
+  _doGrenadeThrow(){
+    const now = performance.now()
+    if (now - this.lastLocalThrow < CFG.GRENADE_CD) return
+    this.lastLocalThrow = now
+    this.throwSeq++
+
+    /* для хоста не предсказываем локально — он сам авторитетно бросит через simulateHost */
+    if (this.isHost) return
+
+    const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
+    const ax = this.aimVec.x / len
+    const ay = this.aimVec.y / len
+    const force = clamp(this.aimForce || 1, CFG.GRENADE_MIN_FORCE, 1)
+    this.sfx.grenadeThrow(0, 1)
+    this.spawnLocalGrenade(ax, ay, force)
+  }
+
+  _spatial(srcX, srcY, mul=1){
+    const dx = srcX - this.local.x
+    const dy = srcY - this.local.y
+    const dist = Math.hypot(dx, dy)
+    const pan = clamp(dx / 500, -1, 1)
+    const vol = clamp(1 - dist / CFG.SFX_MAX_DIST, 0.1, 1) * mul
+    return { pan, vol }
+  }
+
+  _computeFireBehavior(bonuses, now){
+    const rapid = bonuses[0] > now
+    const homing = bonuses[1] > now
+    const ricochet = bonuses[2] > now
+    const sprayer = bonuses[4] > now
+
+    if (sprayer){
+      return {
+        fireCd: CFG.BONUS_SPRAYER_FIRE_CD,
+        opts: { homing: false, ricochet: 0, sprayer: true },
+        kind: 'sprayer',
+      }
+    }
+
+    let fireCd = CFG.FIRE_CD
+    if (rapid) fireCd = CFG.FIRE_CD * CFG.BONUS_FIRE_MUL
+    if (homing) fireCd = Math.max(fireCd, CFG.BONUS_HOMING_FIRE_CD)
+
+    const opts = {
+      homing: homing,
+      ricochet: ricochet ? CFG.BONUS_RICOCHET_MAX : 0,
+      sprayer: false,
+    }
+    let kind = 'normal'
+    if (homing && ricochet) kind = 'homingRicochet'
+    else if (homing) kind = 'homing'
+    else if (ricochet) kind = 'ricochet'
+
+    return { fireCd, opts, kind }
+  }
+
+  /* ============================================================
+     NETWORK
+     ============================================================ */
+  setupNetwork(){
+    this.handlers = {
+      in:   (d, id) => this.onNetInput(d, id),
+      st:   (d, id) => this.onNetState(d, id),
+      bl:   (d, id) => this.onNetBullet(d, id),
+      bu:   (d, id) => this.onNetBulletUpdate(d, id),
+      hit:  (d, id) => this.onNetHit(d, id),
+      gex:  (d, id) => this.onNetExplosion(d, id),
+      tok:  (d, id) => this.onNetToken(d, id),
+      ban:  (d, id) => this.onNetBan(d, id),
+      png:  (d, id) => this.onNetPing(d, id),
+      id:   (d, id) => this.onNetIdentity(d, id),
+      vote: (d, id) => this.onNetVote(d, id),
+    }
+    this.connectToRelay()
+  }
+
+  connectToRelay(){
+    try { this.ws = new WebSocket(RELAY_URL) }
+    catch(e){ DBG.err('NET', 'ws fail', e); return }
+
+    this.ws.onopen = () => {
+      this.reconnectAttempts = 0
+      this.ws.send(JSON.stringify({ type: 'join', room: this.roomId, password: this.roomPassword || '' }))
+    }
+
+    this.ws.onmessage = ev => {
+      let msg
+      try { msg = JSON.parse(ev.data) } catch { return }
+      const { type } = msg
+
+      if (type === 'banned'){
+        try { this.ws.close() } catch {}
+        alert('Вас забанил сервер античита: ' + msg.reason)
+        return
+      }
+      if (type === 'error') return
+
+      if (type === 'welcome'){
+        this.serverHostId = 'server'
+        this.migrateMyId(msg.peerId)
+        this.isHost = false
+        this.hasBecomeClient = true
+        for (const peerId of (msg.peers || [])){
+          if (peerId === this.myPeerId) continue
+          this.peers.add(peerId)
+          if (!this.views[peerId]) this.createView(peerId)
+          this.ac.ensure(peerId)
+        }
+        this.peerNames[this.myPeerId] = this.myName
+        this.sendId({ name:this.myName, pubHash:this.identity.pubHash, mode:this.identity.mode }, null)
+        this.updateStatus()
+        return
+      }
+
+      if (type === 'peer-join'){
+        this.sfx.join(0, 0.7)
+        this.peers.add(msg.peerId)
+        if (!this.views[msg.peerId]) this.createView(msg.peerId)
+        this.ac.ensure(msg.peerId)
+        this.updateStatus()
+        return
+      }
+
+      if (type === 'peer-leave'){
+        this.sfx.leave(0, 0.7)
+        this.peers.delete(msg.peerId)
+        this.onPeerLeft(msg.peerId)
+        this.destroyView(msg.peerId)
+        delete this.scores[msg.peerId]
+        delete this.peerNames[msg.peerId]
+        delete this.worldPlayers[msg.peerId]
+        this.updateStatus()
+        return
+      }
+
+      if (type === 'host-change'){
+        this.serverHostId = 'server'
+        this.isHost = false
+        this.hasBecomeClient = true
+        this.updateStatus()
+        return
+      }
+
+      const h = this.handlers[msg.a]
+      if (h) h(msg.d, msg.from)
+    }
+
+    this.ws.onerror = err => DBG.err('NET', 'ws err', err)
+    this.ws.onclose = ev => {
+      if (this.reconnectAttempts < 30){
+        this.reconnectAttempts++
+        const delay = Math.min(2000 * this.reconnectAttempts, 10000)
+        setTimeout(() => this.connectToRelay(), delay)
+      }
+    }
+  }
+
+  migrateMyId(newId){
+    const oldId = this.myPeerId
+    if (oldId === newId) return
+    const v = this.views[oldId]
+    if (v){ this.views[newId] = v; delete this.views[oldId] }
+    if (this.peerNames[oldId]){ this.peerNames[newId] = this.peerNames[oldId]; delete this.peerNames[oldId] }
+    this.peerNames[newId] = this.myName
+    this.myPeerId = newId
+    this.updateStatus()
+  }
+
+  sendTo(action, data, peerId){
+    if (!this.ws || this.ws.readyState !== 1) return
+    this.ws.send(JSON.stringify({ to: peerId, data: { a: action, d: data } }))
+  }
+  broadcast(action, data){
+    if (!this.ws || this.ws.readyState !== 1) return
+    this.ws.send(JSON.stringify({ data: { a: action, d: data } }))
+  }
+
+  sendServer(action, data){
+    if (!this.ws || this.ws.readyState !== 1) return
+    if (this.ws.bufferedAmount > 64 * 1024) return
+    this.ws.send(JSON.stringify({ data:{ a:action, d:data } }))
+  }
+  sendInput  (d, id) { this.sendServer('in', d) }
+  sendState  (d, id) { this.sendTo('st', d, id) }
+  sendBullet (d)     { this.broadcast('bl', d) }
+  sendHit    (d)     { this.broadcast('hit', d) }
+  sendExplosion(d)   { this.broadcast('gex', d) }
+  sendTok    (d, id) { this.sendTo('tok', d, id) }
+  sendBan    (d, id) { this.sendTo('ban', d, id) }
+  sendPing   (d, id) { this.sendServer('png', d) }
+  sendId     (d, id) { this.sendServer('id', d) }
+  sendVote   (d){
+    if (this.isHost){ this.broadcast('vote', d) }
+    else {
+      const hostId = this.currentHostId()
+      if (hostId && hostId !== this.myPeerId) this.sendTo('vote', d, hostId)
+    }
+  }
+
+  onNetInput(data, fromId){
+    if (this.ac.bans.has(fromId)) return
+    if (!this.ac.validateInput(fromId, data)) return
+    data._t = performance.now()
+    this.inputs[fromId] = data
+  }
+  onNetState(data){
+    this.applyState(data)
+  }
+  onNetBullet(data){
+    if (data.owner === this.myPeerId){
+      const prefix = 'local_' + this.myPeerId
+      const now = performance.now()
+      let fresh = false
+      for (const k in this.ghostBullets){
+        if (k.startsWith(prefix) && now - this.ghostBullets[k].born < 300){ fresh = true; break }
+      }
+      if (fresh) return
+    }
+    const owner = this.views[data.owner]
+    if (data.grenade){
+      if (owner){
+        const sp = this._spatial(owner.sprite.x, owner.sprite.y)
+        this.sfx.grenadeThrow(sp.pan, sp.vol)
+      } else {
+        this.sfx.grenadeThrow(0, 0.4)
+      }
+    } else {
+      let kind = 'normal'
+      if (data.sprayer) kind = 'sprayer'
+      else if (data.homing && data.ricochet) kind = 'homingRicochet'
+      else if (data.homing) kind = 'homing'
+      else if (data.ricochet) kind = 'ricochet'
+      if (owner){
+        const sp = this._spatial(owner.sprite.x, owner.sprite.y)
+        this.sfx.shoot(kind, sp.pan, sp.vol)
+      } else {
+        this.sfx.shoot(kind, 0, 0.4)
+      }
+    }
+    this.spawnGhostBullet(data)
+  }
+  onNetBulletUpdate(data){
+    const b = this.ghostBullets[data.id]
+    if (!b) {
+      // A projectile can become visible only after it enters our fog-of-war.
+      // In that case the server sends its current position as a normal spawn.
+      this.onNetBullet(data)
+      return
+    }
+    if (Number.isFinite(data.x)) b.sprite.x = data.x
+    if (Number.isFinite(data.y)) b.sprite.y = data.y
+    if (Number.isFinite(data.vx)) b.vx = data.vx
+    if (Number.isFinite(data.vy)) b.vy = data.vy
+  }
+
+  onNetHit(data){
+    this.applyHit(data)
+  }
+  onNetExplosion(data){
+    this.applyExplosion(data)
+  }
+  onNetToken(data, fromId){
+    if (data.request){
+      if (this.isHost){
+        const tok = this.ac.issueToken(fromId)
+        this.sendTok({ token: tok }, fromId)
+      }
+    } else if (data.token){
+      this.ac.setMyToken(data.token)
+    }
+  }
+  onNetBan(data){
+    if (data.full){
+      if (Array.isArray(data.bans)) for (const id of data.bans) this.ac.bans.add(id)
+      if (Array.isArray(data.pbans)){
+        for (const h of data.pbans) this.ac.persistentBans.add(h)
+        this.ac.savePersistentBans()
+      }
+    } else if (data.id){
+      this.ac.bans.add(data.id)
+      if (data.pubHash) { this.ac.persistentBans.add(data.pubHash); this.ac.savePersistentBans() }
+      this.onAntiCheatBan(data.id, data.reason || 'banned', !!data.pubHash)
+    }
+  }
+  onNetPing(data, fromId){
+    const p = this.ac.ensure(fromId)
+    if (data.pong){
+      p.rtt = performance.now() - data.t
+      p.lastUpdate = performance.now()
+    }
+  }
+  async onNetIdentity(data, fromId){
+    if (data.name){
+      const n = cleanName(data.name)
+      if (n){
+        this.peerNames[fromId] = n
+        const v = this.views[fromId]
+        if (v && v.label) v.label.setText(n)
+        this.renderScores()
+      }
+    }
+    if (data.challenge){
+      const sig = await this.identity.sign(data.challenge)
+      this.sendId({
+        pubJwk: this.identity.pubJwk || null,
+        pubHash: this.identity.pubHash,
+        sig, mode: this.identity.mode, name: this.myName,
+      }, fromId)
+    } else if (data.pubHash){
+      if (!this.isHost) return
+      const p = this.ac.ensure(fromId)
+      p.pubHash = data.pubHash
+      p.pubJwk = data.pubJwk
+      if (data.mode === 'crypto' && data.pubJwk && data.sig){
+        p.verified = await this.identity.verify(data.pubJwk, p.nonce || '', data.sig)
+      }
+      if (this.ac.isPersistentlyBanned(data.pubHash)){ this.ac.ban(fromId, 'persistent ban', false); return }
+      acLog(`✓ ${fromId.slice(0,6)} id:${(data.pubHash||'?').slice(0,6)}${p.verified?' v':''}`)
+    }
+  }
+  onNetVote(data, fromId){
+    if (this.isHost && fromId !== this.myPeerId){
+      for (const peerId of this.peers){
+        if (peerId !== fromId) this.sendTo('vote', data, peerId)
+      }
+    }
+    if (data.kind === 'start') this.beginVote(data.target, fromId)
+    else if (data.kind === 'cast') this.castVote(fromId, data.agree)
+    else if (data.kind === 'blacklist'){
+      this.hostBlacklist.add(data.id)
+      this.updateStatus()
+    }
+  }
+  onPeerLeft(id){
+    delete this.inputs[id]
+    delete this.worldPlayers[id]
+    delete this.scores[id]
+    delete this.peerNames[id]
+    this.destroyView(id)
+    this.ac.remove(id)
+    this.votes.delete(id)
+    if (this.voteTarget === id) this.endVote()
+  }
+
+  currentHostId(){ return this.isHost ? this.myPeerId : this.serverHostId }
+
+  isInsideWall(x, y, r){
+    for (const w of this.wallRects){
+      if (x > w.x-r && x < w.x+w.w+r && y > w.y-r && y < w.y+w.h+r) return true
+    }
+    return false
+  }
+
+  spawnPickup(){
+    const WEIGHTS = { hp:1.2, rapid:1, homing:1, ricochet:1, shield:1, sprayer:1.5 }
+    const currentTypes = new Set(this.pickups.map(p => p.type))
+    const candidates = Object.keys(WEIGHTS).filter(t => !currentTypes.has(t))
+    if (candidates.length === 0) return
+
+    let total = 0
+    for (const t of candidates) total += WEIGHTS[t]
+    let r = Math.random() * total
+    let type = candidates[0]
+    for (const t of candidates){
+      r -= WEIGHTS[t]
+      if (r <= 0){ type = t; break }
+    }
+
+    let x, y, tries = 0
+    do {
+      x = 100 + Math.random() * (CFG.W - 200)
+      y = 100 + Math.random() * (CFG.H - 200)
+      tries++
+    } while (this.isInsideWall(x, y, 40) && tries < 40)
+    if (tries >= 40) return
+
+    const id = 'pk_' + (++this.pickupSeq)
+    this.pickups.push({ id, type, x, y })
+    const sp = this._spatial(x, y, 0.6)
+    this.sfx.pickupSpawn(sp.pan, sp.vol)
+  }
+
+  applyPickup(id, type){
+    const p = this.worldPlayers[id]
+    if (!p) return
+    if (!p.bonuses) this.resetBonuses(p)
+    const now = performance.now()
+    if (type === 'hp'){
+      p.hp = Math.min(p.hp + CFG.BONUS_HP_AMOUNT, CFG.MAX_HP)
+    } else if (type === 'rapid'){
+      p.bonuses.rapidUntil = now + CFG.BONUS_DURATION
+    } else if (type === 'homing'){
+      p.bonuses.homingUntil = now + CFG.BONUS_DURATION
+    } else if (type === 'ricochet'){
+      p.bonuses.ricochetUntil = now + CFG.BONUS_DURATION
+    } else if (type === 'shield'){
+      p.bonuses.shieldHits = (p.bonuses.shieldHits || 0) + 1
+    } else if (type === 'sprayer'){
+      p.bonuses.sprayerUntil = now + CFG.BONUS_DURATION
+    }
+    if (id === this.myPeerId){
+      this.sfx.pickup(type, 0, 1)
+    } else {
+      const sp = this._spatial(p.x, p.y, 0.9)
+      this.sfx.pickup(type, sp.pan, sp.vol)
+    }
+  }
+
+  resetBonuses(p){
+    p.bonuses = { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 }
+  }
+
+  syncPickups(list){
+    if (!list) return
+    const seen = new Set()
+    for (let i = 0; i < list.length; i++){
+      const [id, type, x, y] = list[i]
+      seen.add(id)
+      if (!this.pickupSprites[id]){
+        const emoji = { hp:'❤️', rapid:'⚡', homing:'🎯', ricochet:'🏓', shield:'🛡', sprayer:'💦' }[type] || '❓'
+        const t = this.add.text(x, y, emoji, { fontSize: '32px', fontFamily: 'monospace' })
+          .setOrigin(0.5).setDepth(6).setAlpha(0.9)
+        t.setData('type', type)
+        this.tweens.add({
+          targets: t, scale: { from: 0.85, to: 1.15 },
+          duration: 700, yoyo: true, repeat: -1,
+        })
+        this.pickupSprites[id] = t
+      } else {
+        this.pickupSprites[id].setPosition(x, y)
+      }
+    }
+    for (const id in this.pickupSprites){
+      if (!seen.has(id)){
+        const sprite = this.pickupSprites[id]
+        const type = sprite.getData('type') || 'hp'
+        const dx = sprite.x - this.local.x
+        const dy = sprite.y - this.local.y
+        const dist = Math.hypot(dx, dy)
+        if (dist < 200){
+          const pan = clamp(dx / 500, -1, 1)
+          const vol = clamp(1 - dist / 300, 0.4, 1)
+          this.sfx.pickup(type, pan, vol)
+        }
+        sprite.destroy()
+        delete this.pickupSprites[id]
+      }
+    }
+  }
+
+  addPlayerToWorld(id){
+    if (!id || this.worldPlayers[id]) return
+    const v = this.views[id]
+    const idx = Object.keys(this.worldPlayers).length
+    const spawn = SPAWNS[idx % SPAWNS.length]
+    this.worldPlayers[id] = {
+      x: (v && v.init && (v.tx||v.ty)) ? v.tx : spawn.x,
+      y: (v && v.init && (v.tx||v.ty)) ? v.ty : spawn.y,
+      vx:0, vy:0, aimX:1, aimY:0,
+      hp: CFG.MAX_HP, dead:false, fireAt:0, respawnAt:0, score:0,
+      bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 },
+      dashUntil: 0, dashDirX: 1, dashDirY: 0, lastDseq: 0,
+      lastTseq: 0, lastThrow: 0,
+    }
+    if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
+  }
+
+  becomeHost(){
+    const myCurX = this.predicted.x, myCurY = this.predicted.y
+    const meWasInit = Math.abs(myCurX) > 1 || Math.abs(myCurY) > 1
+    this.worldPlayers = {}
+    this.pickups = []
+    this.lastPickupSpawn = 0
+    const ids = [this.myPeerId, ...this.peers].filter(id => id && !this.ac.bans.has(id))
+    for (const id of ids){
+      const v = this.views[id]
+      const spawn = SPAWNS[ids.indexOf(id) % SPAWNS.length]
+      const use = v && v.init && (Math.abs(v.tx) > 1 || Math.abs(v.ty) > 1)
+      this.worldPlayers[id] = {
+        x: use ? v.tx : spawn.x, y: use ? v.ty : spawn.y,
+        vx:0, vy:0, aimX:1, aimY:0,
+        hp: v ? v.hp : CFG.MAX_HP, dead: v ? v.dead : false,
+        fireAt:0, respawnAt:0, score:0,
+        bonuses: { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 },
+        dashUntil: 0, dashDirX: 1, dashDirY: 0, lastDseq: 0,
+        lastTseq: 0, lastThrow: 0,
+      }
+      if (!this.inputs[id]) this.inputs[id] = { m:[0,0], a:[1,0], f:0 }
+    }
+    const me = this.worldPlayers[this.myPeerId]
+    if (me){
+      if (meWasInit){ me.x = myCurX; me.y = myCurY }
+      else { const s = SPAWNS[0]; me.x = s.x; me.y = s.y }
+      this.local.x = me.x; this.local.y = me.y
+      this.predicted.x = me.x; this.predicted.y = me.y
+      const v = this.views[this.myPeerId]
+      if (v){ v.tx = me.x; v.ty = me.y; v.sprite.x = me.x; v.sprite.y = me.y; v.init = true }
+    }
+    for (const peerId of this.peers){
+      this.sendBan({ full:true, bans:[...this.ac.bans], pbans:[...this.ac.persistentBans] }, peerId)
+    }
+    acLog(`👑 хост: ${this.myPeerId.slice(0,6)}`)
+    this.updateStatus()
+  }
+
+  onVoteClick(){
+    const hostId = this.currentHostId()
+    if (!hostId || hostId === this.myPeerId){ acLog('✖ ты хост'); return }
+    if (this.voteActive && this.voteTarget === hostId){
+      const already = this.votes.has(this.myPeerId)
+      this.castVote(this.myPeerId, !already)
+      this.sendVote({ kind:'cast', agree: !already })
+      return
+    }
+    this.beginVote(hostId, this.myPeerId)
+    this.sendVote({ kind:'start', target: hostId })
+  }
+  beginVote(target, initiator){
+    if (this.voteActive) return
+    this.voteActive = true
+    this.voteTarget = target
+    this.voteDeadline = performance.now() + VOTE_DURATION_MS
+    this.votes.clear()
+    if (initiator) this.votes.set(initiator, target)
+    this.updateVoteUI()
+  }
+  castVote(voter, agree){
+    if (!this.voteActive) return
+    if (agree) this.votes.set(voter, this.voteTarget)
+    else this.votes.delete(voter)
+    this.checkVoteResult()
+    this.updateVoteUI()
+  }
+  checkVoteResult(){
+    if (!this.voteActive) return
+    const total = 1 + this.peers.size
+    const yes = this.votes.size
+    const failed = performance.now() > this.voteDeadline
+    if (yes > total / 2){
+      this.hostBlacklist.add(this.voteTarget)
+      this.sendVote({ kind:'blacklist', id: this.voteTarget })
+      this.endVote()
+    } else if (failed) this.endVote()
+  }
+  endVote(){
+    this.voteActive = false
+    this.voteTarget = null
+    this.votes.clear()
+    this.voteBtn.classList.remove('armed')
+    this.updateVoteUI()
+  }
+  updateVoteUI(){
+    if (!this.voteInfo || !this.voteBtn) return
+    if (!this.voteActive){ this.voteInfo.textContent = ''; this.voteBtn.classList.remove('armed'); return }
+    const total = 1 + this.peers.size
+    const yes = this.votes.size
+    this.voteInfo.textContent = `VOTE ${yes}/${total}\nцель: ${(this.voteTarget||'').slice(0,6)}`
+    this.voteBtn.classList.toggle('armed', this.votes.has(this.myPeerId))
+  }
+
+  updateStatus(){
+    if (!this.statusEl) return
+    const n = this.peers.size + (this.myPeerId ? 1 : 0)
+    const role = this.isHost ? 'HOST' : (this.hasBecomeClient ? 'CLIENT' : 'WAIT')
+    const hp = Math.max(0, Math.round(this.local.hp))
+    const sc = this.local.score || 0
+    const myName = this.peerNames[this.myPeerId] || this.myName || '?'
+    let ping = 0
+    for (const [, p] of this.ac.peers){
+      const v = p.rtt || 0
+      if (v > 0 && v < 5000 && v > ping) ping = v
+    }
+    ping = Math.round(ping)
+    this.statusEl.textContent = `${role} · ${myName} · ${this.roomId} · игроков: ${n} · HP: ${hp} · очки: ${sc} · ping: ${ping}ms`
+  }
+
+  renderBonuses(){
+    if (!this.bonusesEl) return
+    const bn = this.localBonuses
+    const now = performance.now()
+    const parts = []
+    if (bn[4] > now){
+      parts.push(`💦 ${Math.ceil((bn[4]-now)/1000)}s`)
+    } else {
+      if (bn[0] > now) parts.push(`⚡ ${Math.ceil((bn[0]-now)/1000)}s`)
+      if (bn[1] > now) parts.push(`🎯 ${Math.ceil((bn[1]-now)/1000)}s`)
+      if (bn[2] > now) parts.push(`🏓 ${Math.ceil((bn[2]-now)/1000)}s`)
+    }
+    if (bn[3] > 0) parts.push(`🛡 ×${bn[3]}`)
+    if (parts.length){
+      this.bonusesEl.textContent = parts.join(' · ')
+      this.bonusesEl.style.display = 'block'
+    } else {
+      this.bonusesEl.style.display = 'none'
+    }
+  }
+
+  renderScores(){
+    if (!this.scoresEl) return
+    if (!this.scores || Object.keys(this.scores).length === 0){ this.scoresEl.textContent = ''; return }
+    const rows = []
+    for (const id in this.scores){
+      if (id !== this.myPeerId && !this.peers.has(id)) continue
+      const score = this.scores[id]
+      const v = this.views[id]
+      const isMe = id === this.myPeerId
+      const dead = v ? v.dead : false
+      rows.push({ id, score, isMe, dead })
+    }
+    rows.sort((a,b) => b.score - a.score)
+    let html = '🏆 СЧЁТ\n'
+    for (let i = 0; i < rows.length; i++){
+      const r = rows[i]
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  '
+      const tag = r.isMe ? ' (я)' : ''
+      const cls = r.isMe ? 'me' : (r.dead ? 'dead' : '')
+      const name = this.peerNames[r.id] || r.id.slice(0, 6)
+      html += `<span class="${cls}">${medal} ${name}${tag} · ${r.score}</span>\n`
+    }
+    this.scoresEl.innerHTML = html
+  }
+
+  applyState(data){
+    if (!data || !data.p) return
+    if (data.names){
+      for (const id in data.names){
+        const n = cleanName(data.names[id])
+        if (n) this.peerNames[id] = n
+      }
+    }
+    if (data.scores){
+      this.scores = data.scores
+      if (this.myPeerId && this.scores[this.myPeerId] !== undefined){
+        this.local.score = this.scores[this.myPeerId]
+      }
+    }
+    if (data.pickups) this.syncPickups(data.pickups)
+
+    const now = performance.now()
+    for (const id in data.p){
+      if (id !== this.myPeerId && !this.peers.has(id)) continue
+      const arr = data.p[id]
+      const x = arr[0], y = arr[1], ax = arr[2], ay = arr[3], hp = arr[4], dead = arr[5]
+      const bn = arr[6]
+      if (id === this.myPeerId){
+        this.local.hp = hp
+        this.local.dead = !!dead
+        if (bn && Array.isArray(bn) && bn.length >= 4){
+          this.localBonuses = [
+            bn[0] > 0 ? now + bn[0] : 0,
+            bn[1] > 0 ? now + bn[1] : 0,
+            bn[2] > 0 ? now + bn[2] : 0,
+            bn[3] || 0,
+            bn[4] > 0 ? now + bn[4] : 0,
+          ]
+        } else {
+          this.localBonuses = [0, 0, 0, 0, 0]
+        }
+        const dx = x - this.predicted.x, dy = y - this.predicted.y
+        if (Math.abs(dx) > 120 || Math.abs(dy) > 120){
+          this.predicted.x = x; this.predicted.y = y
+        } else {
+          this.predicted.x += dx * 0.15
+          this.predicted.y += dy * 0.15
+        }
+      } else {
+        let v = this.views[id]
+        if (!v){ v = this.createView(id); v.tx = x; v.ty = y; v.init = true; v.sprite.x = x; v.sprite.y = y }
+        const wasDead = v.dead
+        if (!v.buffer) v.buffer = []
+        v.buffer.push({ x, y, ax, ay, hp, dead, bn, t: now })
+        while (v.buffer.length > 15) v.buffer.shift()
+        v.tx = x; v.ty = y
+        v.hp = hp; v.dead = !!dead
+        const sp = this._spatial(v.sprite.x, v.sprite.y)
+        if (wasDead && !v.dead) this.sfx.respawn(sp.pan, sp.vol * 0.8)
+        if (!wasDead && v.dead) this.sfx.death(sp.pan, sp.vol)
+      }
+    }
+    for (const id in this.views){
+      if (id === this.myPeerId) continue
+      if (!(id in data.p) || !this.peers.has(id)){
+        this.destroyView(id)
+        delete this.scores[id]
+        delete this.peerNames[id]
+      }
+    }
+  }
+
+  spawnGhostBullet(d){
+    if (this.ghostBullets[d.id]) return
+    let color = 0xffe066
+    let size = CFG.BULLET_SIZE
+    if (d.grenade){
+      color = 0x88dd44
+      size = CFG.GRENADE_R * 2.4
+    } else if (d.sprayer){
+      color = 0xffaa33
+      size = CFG.BULLET_SIZE * 0.7
+    } else if (d.homing && d.ricochet) color = 0xff22ff
+    else if (d.homing) color = 0xff66ff
+    else if (d.ricochet) color = 0x22ffff
+
+    const s = this.add.image(d.x, d.y, 'bullet')
+      .setDisplaySize(size, size)
+      .setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(5)
+
+    this.ghostBullets[d.id] = {
+      sprite: s, vx: d.vx, vy: d.vy, born: this.time.now,
+      bouncesLeft: d.ricochet || 0,
+      homing: !!d.homing,
+      sprayer: !!d.sprayer,
+      grenade: !!d.grenade,
+      explodeAt: d.grenade ? this.time.now + CFG.GRENADE_FUSE : 0,
+    }
+  }
+
+  applyHit(d){
+    if (d.bid && this.ghostBullets[d.bid]){
+      this.ghostBullets[d.bid].sprite.destroy()
+      delete this.ghostBullets[d.bid]
+    }
+    const isMe = d.target === this.myPeerId
+    const byMe = d.by === this.myPeerId
+
+    if (byMe && !isMe){
+      this.sfx.hitPlayer(0, 1)
+      if (d.dead) this.sfx.kill(0, 1)
+    } else if (isMe){
+      if (d.blocked) this.sfx.hitShield(0, 1)
+      else {
+        this.sfx.hitPlayer(0, 1)
+        if (d.dead) this.sfx.death(0, 1)
+      }
+    } else {
+      const v = this.views[d.target]
+      if (v){
+        const sp = this._spatial(v.sprite.x, v.sprite.y, 0.8)
+        if (d.blocked) this.sfx.hitShield(sp.pan, sp.vol)
+        else this.sfx.hitPlayer(sp.pan, sp.vol)
+        if (d.dead) this.sfx.death(sp.pan, sp.vol)
+      }
+    }
+
+    if (isMe){
+      if (d.blocked){
+        this.cameras.main.flash(90, 100, 200, 255)
+        if (this.localBonuses[3] > 0) this.localBonuses[3]--
+      } else {
+        this.local.hp = d.hp
+        this.local.dead = !!d.dead
+        this.cameras.main.flash(90, 255, 30, 100)
+        if (d.dead){
+          this.localBonuses = [0, 0, 0, 0, 0]
+          this.dash.cdUntil = 0
+          this.dash.until = 0
+        }
+      }
+    }
+    const v = this.views[d.target]
+    if (v){
+      v.hp = d.hp
+      if (d.dead) v.dead = true
+      v.sprite.setTintFill(d.blocked ? 0x88ccff : 0xffffff)
+      this.time.delayedCall(60, ()=>{
+        if (v.sprite && v.sprite.active) v.sprite.setTint(colorFromId(d.target))
+      })
+    }
+    if (byMe) this.cameras.main.shake(50, 0.002)
+
+    if (d.dead && d.killed){
+      const killerName = this.peerNames[d.by] || (d.by || '?').slice(0,6)
+      const victimName = this.peerNames[d.target] || (d.target || '?').slice(0,6)
+      const weapon = d.sprayer ? '💦' : '🔫'
+      this.addKillFeed(killerName, victimName, byMe, weapon)
+      if (byMe){
+        this.flashVignette()
+        this.cameras.main.shake(90, 0.004)
+      }
+    }
+  }
+
+  applyExplosion(data){
+    const g = this.add.graphics().setDepth(15)
+    g.fillStyle(0xffaa33, 0.65)
+    g.fillCircle(data.x, data.y, data.r)
+    g.lineStyle(4, 0xff4400, 1)
+    g.strokeCircle(data.x, data.y, data.r)
+    this.tweens.add({
+      targets: g, alpha: 0, scale: 1.3, duration: 400,
+      onComplete: () => g.destroy(),
+    })
+    const g2 = this.add.graphics().setDepth(16)
+    g2.fillStyle(0xffffff, 0.9)
+    g2.fillCircle(data.x, data.y, data.r * 0.4)
+    this.tweens.add({
+      targets: g2, alpha: 0, scale: 2, duration: 250,
+      onComplete: () => g2.destroy(),
+    })
+
+    const sp = this._spatial(data.x, data.y, 1)
+    this.sfx.explosion(sp.pan, sp.vol)
+
+    const dx = this.local.x - data.x
+    const dy = this.local.y - data.y
+    const dist = Math.hypot(dx, dy)
+    const shakeIntensity = Math.max(0, 1 - dist / 700) * 0.012
+    if (shakeIntensity > 0.001){
+      this.cameras.main.shake(220, shakeIntensity)
+    }
+
+    if (Array.isArray(data.hits)){
+      for (const h of data.hits){
+        if (h.tid === this.myPeerId){
+          if (h.blocked){
+            this.sfx.hitShield(0, 1)
+            this.cameras.main.flash(120, 100, 200, 255)
+            if (this.localBonuses[3] > 0) this.localBonuses[3]--
+          } else {
+            this.local.hp = h.hp
+            this.local.dead = !!h.dead
+            this.cameras.main.flash(150, 255, 30, 100)
+            this.sfx.hitPlayer(0, 1)
+            if (h.dead){
+              this.sfx.death(0, 1)
+              this.localBonuses = [0, 0, 0, 0, 0]
+              this.dash.cdUntil = 0
+              this.dash.until = 0
+            }
+          }
+        }
+        const v = this.views[h.tid]
+        if (v){
+          v.hp = h.hp
+          if (h.dead) v.dead = true
+        }
+      }
+      for (const h of data.hits){
+        if (h.killed){
+          const killerName = this.peerNames[data.owner] || (data.owner || '?').slice(0,6)
+          const victimName = this.peerNames[h.tid] || (h.tid || '?').slice(0,6)
+          const byMe = data.owner === this.myPeerId
+          this.addKillFeed(killerName, victimName, byMe, '💣')
+          if (byMe) this.flashVignette()
+        }
+      }
+    }
+  }
+
+  createView(id){
+    if (this.views[id]) return this.views[id]
+    const sprite = this.add.image(0, 0, 'player')
+      .setDisplaySize(CFG.PLAYER_W, CFG.PLAYER_H).setDepth(10).setTint(colorFromId(id))
+    const bar = this.add.graphics().setDepth(11)
+    const label = this.add.text(0, 0, this.peerNames[id] || id.slice(0, 6), {
+      fontFamily: 'monospace', fontSize: '11px', color: '#e6edf3',
+      stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(12)
+    const shield = this.add.circle(0, 0, CFG.PLAYER_W * 0.6, 0x66ccff, 0.25)
+      .setDepth(9).setVisible(false)
+    this.views[id] = { sprite, bar, label, shield, hp:CFG.MAX_HP, dead:false,
+                       tx:0, ty:0, ta:0, init:false, buffer:[] }
+    return this.views[id]
+  }
+  destroyView(id){
+    const v = this.views[id]; if (!v) return
+    v.sprite.destroy()
+    v.bar.destroy()
+    if (v.label) v.label.destroy()
+    if (v.shield) v.shield.destroy()
+    delete this.views[id]
+  }
+
+  updateFog(){
+    if (!this.fogOverlay) return
+    const cam=this.cameras.main
+    const zoom=cam.zoom||1
+    const sx=(this.local.x-cam.scrollX)*zoom
+    const sy=(this.local.y-cam.scrollY)*zoom
+    const radius=Math.max(150,Math.min(360,360*zoom))
+    this.fogOverlay.style.background=`radial-gradient(circle ${radius}px at ${sx}px ${sy}px,rgba(0,0,0,0) 0%,rgba(0,0,0,.08) 45%,rgba(0,0,0,.64) 76%,rgba(0,0,0,.93) 100%)`
+  }
+
+  updateGrenadeTrajectory(){
+    if (!this.grenadePreview) return
+    this.grenadePreview.clear()
+    if (this.weapon!=='grenade' || !this.firing || this.local.dead) return
+
+    const len=Math.hypot(this.aimVec.x,this.aimVec.y)||1
+    const ax=this.aimVec.x/len, ay=this.aimVec.y/len
+    let force=clamp(this.aimForce||1,CFG.GRENADE_MIN_FORCE,1)
+    let x=this.local.x+ax*(CFG.PLAYER_R+8), y=this.local.y+ay*(CFG.PLAYER_R+8)
+    let vx=ax*CFG.GRENADE_SPEED*force, vy=ay*CFG.GRENADE_SPEED*force
+    const dt=.035, dragK=CFG.GRENADE_DRAG_K
+    let landing={x,y}; let stopped=false
+    this.grenadePreview.lineStyle(2,0xffffff,.82)
+    for(let i=0;i<48;i++){
+      const drag=Math.exp(-dragK*dt); vx*=drag; vy*=drag
+      const nx=x+vx*dt, ny=y+vy*dt
+      let hit=null
+      for(const r of this.wallRects){
+        if(nx>r.x-CFG.GRENADE_R&&nx<r.x+r.w+CFG.GRENADE_R&&ny>r.y-CFG.GRENADE_R&&ny<r.y+r.h+CFG.GRENADE_R){hit=r;break}
+      }
+      if(hit){
+        const q=resolveCircleRect(nx,ny,CFG.GRENADE_R,hit)
+        if(q){x=q.x;y=q.y}
+        vx=0;vy=0;stopped=true;landing={x,y}
+      }else{x=nx;y=ny;landing={x,y}}
+      if(i%2===0){
+        this.grenadePreview.fillStyle(0xffffff,.9)
+        this.grenadePreview.fillCircle(x,y,3)
+      }
+      if(stopped)break
+    }
+    this.grenadePreview.lineStyle(2,0xffd84d,.95)
+    this.grenadePreview.strokeCircle(landing.x,landing.y,11)
+    this.grenadePreview.lineStyle(2,0xffd84d,.65)
+    this.grenadePreview.lineBetween(landing.x-16,landing.y,landing.x+16,landing.y)
+    this.grenadePreview.lineBetween(landing.x,landing.y-16,landing.x,landing.y+16)
+  }
+
+  update(time, delta){
+    const dt = Math.min(delta, 50) / 1000
+
+    if (time - this.lastAcTick > 250){
+      const dtAc = (time - this.lastAcTick) / 1000
+      this.lastAcTick = time
+      this.ac.tick(dtAc)
+    }
+    if (this.voteActive) this.checkVoteResult()
+
+    if (!this.local.dead){
+      const now = performance.now()
+      let speed = CFG.SPEED
+      let mx = this.moveVec.x, my = this.moveVec.y
+      if (now < this.dash.until){
+        mx = this.dash.dirX; my = this.dash.dirY
+        speed = CFG.DASH_SPEED
+      }
+      const nx = this.predicted.x + mx * speed * dt
+      const ny = this.predicted.y + my * speed * dt
+      const p = this.resolveWorld(nx, ny)
+      this.predicted.x = p.x; this.predicted.y = p.y
+    }
+    this.local.x = this.predicted.x
+    this.local.y = this.predicted.y
+    this.local.aimX = this.aimVec.x
+    this.local.aimY = this.aimVec.y
+
+    if (time - this._lastPing > 5000){
+      this._lastPing = time
+      this.sendPing({ t: performance.now(), pong: 0 }, null)
+    }
+
+    if (!this.isHost && time - this._lastNameSent > 5000){
+      this._lastNameSent = time
+      const hostId = this.currentHostId()
+      if (hostId && hostId !== this.myPeerId){
+        this.sendId({ name: this.myName }, hostId)
+      }
+    }
+
+    /* 🆕 f=1 только для ружья (гранаты — через tseq) */
+    const firingFlag = (this.weapon === 'rifle' && this.firing) ? 1 : 0
+
+    if (!this.isHost && time - this.lastInputSent > CFG.INPUT_MS){
+      this.lastInputSent = time
+      const hostId = this.currentHostId()
+      if (hostId && hostId !== this.myPeerId){
+        this.ac.seq++
+        const payload = {
+          seq: this.ac.seq,
+          m: [this.moveVec.x, this.moveVec.y],
+          a: [this.aimVec.x, this.aimVec.y],
+          f: firingFlag,
+          d: this.local.dead ? 1 : 0,
+          dseq: this.dashSeq,
+          w: this.weapon === 'grenade' ? 1 : 0,
+          af: this.aimForce,
+          tseq: this.throwSeq,       /* 🆕 */
+        }
+        payload.sig = this.ac.sign(payload)
+        this.sendInput(payload, hostId)
+      }
+    }
+
+    /* Снаряды теперь создаёт авторитетный сервер. */
+
+    this.updateGhostBullets(time, dt)
+    this.updateGrenadeTrajectory()
+    this.updateFog()
+    this.renderPlayers(time, dt)
+    if (time % 200 < 20){
+      this.updateStatus()
+      this.updateVoteUI()
+      this.renderScores()
+      this.renderBonuses()
+      this.updateDashButton()
+      this.updateWeaponButton()
+    }
+  }
+
+  spawnLocalGrenade(ax, ay, force){
+    const id = 'local_' + this.myPeerId + '_g' + (++this.bulletSeq)
+    const speed = CFG.GRENADE_SPEED * (force || 1)
+    this.spawnGhostBullet({
+      id,
+      x: this.local.x + ax * (CFG.PLAYER_R + 6),
+      y: this.local.y + ay * (CFG.PLAYER_R + 6),
+      vx: ax * speed,
+      vy: ay * speed,
+      owner: this.myPeerId,
+      grenade: true,
+    })
+  }
+
+  spawnLocalSprayer(ax, ay){
+    const baseAngle = Math.atan2(ay, ax)
+    const spread = CFG.BONUS_SPRAYER_SPREAD_DEG * Math.PI / 180
+    const n = CFG.BONUS_SPRAYER_PELLETS
+    for (let i = 0; i < n; i++){
+      const t = n === 1 ? 0.5 : i / (n - 1)
+      const jitter = (Math.random() - 0.5) * 0.04
+      const ang = baseAngle - spread/2 + spread * t + jitter
+      const pa = Math.cos(ang), pb = Math.sin(ang)
+      const id = 'local_' + this.myPeerId + '_' + (++this.bulletSeq)
+      this.spawnGhostBullet({
+        id,
+        x: this.local.x + pa * (CFG.PLAYER_R + 6),
+        y: this.local.y + pb * (CFG.PLAYER_R + 6),
+        vx: pa * CFG.BULLET_SPEED,
+        vy: pb * CFG.BULLET_SPEED,
+        owner: this.myPeerId,
+        homing: false,
+        ricochet: 0,
+        sprayer: true,
+      })
+    }
+  }
+
+  resolveWorld(x, y){
+    x = clamp(x, CFG.PLAYER_R, CFG.W - CFG.PLAYER_R)
+    y = clamp(y, CFG.PLAYER_R, CFG.H - CFG.PLAYER_R)
+    for (const r of this.wallRects){
+      const res = resolveCircleRect(x, y, CFG.PLAYER_R, r)
+      if (res){ x = res.x; y = res.y }
+    }
+    return { x, y }
+  }
+
+  simulateHost(time, dt){
+    const now = performance.now()
+
+    for (const id in this.worldPlayers){
+      const p = this.worldPlayers[id]
+      let inp = this.inputs[id] || { m:[0,0], a:[1,0], f:0 }
+      const lastInputAge = time - (inp._t || 0)
+      if (lastInputAge > 500 && id !== this.myPeerId){
+        inp = { m:[0,0], a: inp.a || [1,0], f: 0, w: inp.w || 0, af: inp.af, tseq: inp.tseq }
+      }
+      if (!p.bonuses) this.resetBonuses(p)
+      if (typeof p.dashUntil !== 'number') p.dashUntil = 0
+      if (typeof p.lastDseq !== 'number') p.lastDseq = 0
+      if (typeof p.lastTseq !== 'number') p.lastTseq = 0
+      if (typeof p.lastThrow !== 'number') p.lastThrow = 0
+
+      /* DASH */
+      if (inp.dseq && inp.dseq > p.lastDseq){
+        p.lastDseq = inp.dseq
+        if (!p.dead){
+          let dx = inp.m[0] || 0, dy = inp.m[1] || 0
+          if (Math.hypot(dx, dy) < 0.2){
+            dx = inp.a[0] || 1; dy = inp.a[1] || 0
+          }
+          const len = Math.hypot(dx, dy) || 1
+          p.dashDirX = dx/len
+          p.dashDirY = dy/len
+          p.dashUntil = time + CFG.DASH_DURATION
+          if (id !== this.myPeerId){
+            const sp = this._spatial(p.x, p.y, 0.9)
+            this.sfx.dash(sp.pan, sp.vol)
+          }
+        }
+      }
+
+      /* 🆕 БРОСОК ГРАНАТЫ через tseq */
+      if (inp.tseq && inp.tseq > p.lastTseq){
+        p.lastTseq = inp.tseq
+        if (!p.dead && (time - p.lastThrow) > CFG.GRENADE_CD * AC_CFG.FIRE_TOLERANCE){
+          p.lastThrow = time
+          const len = Math.hypot(p.aimX, p.aimY) || 1
+          const ax = p.aimX / len
+          const ay = p.aimY / len
+          const force = clamp(typeof inp.af === 'number' ? inp.af : 1, CFG.GRENADE_MIN_FORCE, 1)
+          if (id === this.myPeerId) this.sfx.grenadeThrow(0, 1)
+          else {
+            const sp = this._spatial(p.x, p.y)
+            this.sfx.grenadeThrow(sp.pan, sp.vol)
+          }
+          this.hostSpawnGrenade(id, p.x, p.y, ax, ay, force)
+        }
+      }
+
+      if (p.dead){
+        if (time > p.respawnAt){
+          const sp = SPAWNS[Math.floor(Math.random()*SPAWNS.length)]
+          p.x = sp.x; p.y = sp.y; p.hp = CFG.MAX_HP; p.dead = false; p.vx = 0; p.vy = 0
+          p.dashUntil = 0
+          this.resetBonuses(p)
+          if (id === this.myPeerId) this.sfx.respawn(0, 1)
+        } else continue
+      }
+
+      const prev = { x:p.x, y:p.y }
+      let speed = CFG.SPEED
+      let mvx = inp.m[0] || 0
+      let mvy = inp.m[1] || 0
+      const dashing = time < p.dashUntil
+      if (dashing){
+        mvx = p.dashDirX
+        mvy = p.dashDirY
+        speed = CFG.DASH_SPEED
+      }
+
+      p.vx = mvx * speed
+      p.vy = mvy * speed
+      const nx = p.x + p.vx*dt, ny = p.y + p.vy*dt
+      const res = this.resolveWorld(nx, ny)
+      const fixed = this.ac.validateMovement(id, prev, res, dt, speed)
+      p.x = fixed.x; p.y = fixed.y
+      this.ac.recordPosition(id, p.x, p.y)
+      p.aimX = inp.a[0] || 1
+      p.aimY = inp.a[1] || 0
+
+      const bnArr = [
+        p.bonuses.rapidUntil || 0,
+        p.bonuses.homingUntil || 0,
+        p.bonuses.ricochetUntil || 0,
+        p.bonuses.shieldHits || 0,
+        p.bonuses.sprayerUntil || 0,
+      ]
+      const behavior = this._computeFireBehavior(bnArr, now)
+
+      /* 🆕 стрельба только для ружья (гранаты — через tseq выше) */
+      if (inp.w !== 1 && inp.f && time - p.fireAt > behavior.fireCd){
+        if (!this.ac.validateFire(id, time, behavior.fireCd)) continue
+        const len = Math.hypot(p.aimX, p.aimY) || 1
+        const ax = p.aimX/len, ay = p.aimY/len
+        p.fireAt = time
+
+        if (id === this.myPeerId) this.sfx.shoot(behavior.kind, 0, 1)
+        else {
+          const sp = this._spatial(p.x, p.y)
+          this.sfx.shoot(behavior.kind, sp.pan, sp.vol)
+        }
+        if (behavior.opts.sprayer){
+          this.hostSpawnSprayer(id, p.x, p.y, ax, ay)
+        } else {
+          this.hostSpawnBullet(id, p.x, p.y, ax, ay, behavior.opts)
+        }
+      }
+
+      for (let i = this.pickups.length - 1; i >= 0; i--){
+        const pk = this.pickups[i]
+        const dx = p.x - pk.x, dy = p.y - pk.y
+        const rr = CFG.PLAYER_R + CFG.PICKUP_RADIUS
+        if (dx*dx + dy*dy < rr*rr){
+          this.applyPickup(id, pk.type)
+          this.pickups.splice(i, 1)
+        }
+      }
+    }
+
+    if (time - this.lastPickupSpawn > CFG.PICKUP_INTERVAL && this.pickups.length < CFG.PICKUP_MAX){
+      this.lastPickupSpawn = time
+      this.spawnPickup()
+    }
+
+    for (let i = this.bullets.length - 1; i >= 0; i--){
+      const b = this.bullets[i]
+
+      if (b.isGrenade){
+        const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
+        b.vx *= drag
+        b.vy *= drag
+
+        let nx = b.x + b.vx * dt
+        let ny = b.y + b.vy * dt
+
+        let hitWall = false
+        for (const r of this.wallRects){
+          if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
+              ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
+            hitWall = true
+            const rres = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
+            if (rres){ nx = rres.x; ny = rres.y }
+            break
+          }
+        }
+        if (hitWall){ b.vx = 0; b.vy = 0 }
+
+        b.x = nx
+        b.y = ny
+
+        if (time > b.explodeAt){
+          this.hostExplodeGrenade(b, time)
+          this.bullets.splice(i, 1)
+          continue
+        }
+        continue
+      }
+
+      if (b.homing){
+        let nearest = null, nd = Infinity
+        for (const tid of this.nearbyPlayerIds(b.x, b.y)){
+          if (tid === b.owner) continue
+          const t = this.worldPlayers[tid]
+          if (!t || t.dead) continue
+          const dx = t.x - b.x, dy = t.y - b.y
+          const d2 = dx*dx + dy*dy
+          if (d2 < nd){ nd = d2; nearest = t }
+        }
+        if (nearest){
+          const dx = nearest.x - b.x, dy = nearest.y - b.y
+          const targetAngle = Math.atan2(dy, dx)
+          const curAngle = Math.atan2(b.vy, b.vx)
+          const noise = (Math.random() - 0.5) * CFG.BONUS_HOMING_NOISE
+          const wantAngle = targetAngle + noise
+          let diff = wantAngle - curAngle
+          while (diff > Math.PI) diff -= 2*Math.PI
+          while (diff < -Math.PI) diff += 2*Math.PI
+          const turn = Math.max(-CFG.BONUS_HOMING_TURN, Math.min(CFG.BONUS_HOMING_TURN, diff))
+          const speed = Math.hypot(b.vx, b.vy)
+          const newAngle = curAngle + turn
+          b.vx = Math.cos(newAngle) * speed
+          b.vy = Math.sin(newAngle) * speed
+        }
+      }
+
+      let nx = b.x + b.vx*dt
+      let ny = b.y + b.vy*dt
+
+      let hitWall = null
+      for (const r of this.wallRects){
+        if (nx > r.x-CFG.BULLET_R && nx < r.x+r.w+CFG.BULLET_R &&
+            ny > r.y-CFG.BULLET_R && ny < r.y+r.h+CFG.BULLET_R){ hitWall = r; break }
+      }
+
+      if (hitWall){
+        if (b.bouncesLeft > 0){
+          b.bouncesLeft--
+          const sp = this._spatial(b.x, b.y, 0.7)
+          this.sfx.ricochetTick(sp.pan, sp.vol)
+          const cx = hitWall.x + hitWall.w/2
+          const cy = hitWall.y + hitWall.h/2
+          const dx = nx - cx, dy = ny - cy
+          const halfW = hitWall.w/2 + CFG.BULLET_R
+          const halfH = hitWall.h/2 + CFG.BULLET_R
+          const overlapX = halfW - Math.abs(dx)
+          const overlapY = halfH - Math.abs(dy)
+          if (overlapX < overlapY){
+            b.vx = -b.vx
+            nx = b.x + Math.sign(dx || 1) * overlapX
+          } else {
+            b.vy = -b.vy
+            ny = b.y + Math.sign(dy || 1) * overlapY
+          }
+        } else {
+          this.bullets.splice(i, 1)
+          continue
+        }
+      }
+
+      b.x = nx
+      b.y = ny
+
+      if (time - b.born > CFG.BULLET_LIFE*1000){
+        this.bullets.splice(i, 1)
+        continue
+      }
+
+      let hitSomeone = false
+      for (const tid of this.nearbyPlayerIds(b.x, b.y)){
+        if (tid === b.owner) continue
+        const t = this.worldPlayers[tid]
+        if (!t || t.dead) continue
+        const dx = t.x - b.x, dy = t.y - b.y
+        const rr = CFG.PLAYER_R + CFG.BULLET_R
+        if (dx*dx + dy*dy < rr*rr){
+          let blocked = false
+          if (t.bonuses && t.bonuses.shieldHits > 0){
+            t.bonuses.shieldHits--
+            blocked = true
+          } else {
+            const dmg = (typeof b.damage === 'number') ? b.damage : CFG.DAMAGE
+            t.hp -= dmg
+          }
+          let killed = false
+          if (!blocked && t.hp <= 0){
+            t.hp = 0; t.dead = true; t.respawnAt = time + CFG.RESPAWN
+            t.dashUntil = 0
+            killed = true
+            this.resetBonuses(t)
+            const shooter = this.worldPlayers[b.owner]
+            if (shooter) shooter.score = (shooter.score || 0) + 1
+          }
+          const hd = {
+            bid: b.id, target: tid, by: b.owner, hp: t.hp,
+            dead: t.dead, killed, blocked, sprayer: !!b.sprayer,
+          }
+          this.sendHit(hd)
+          this.applyHit(hd)
+          this.bullets.splice(i, 1)
+          hitSomeone = true
+          break
+        }
+      }
+      if (hitSomeone) continue
+    }
+
+    if (time - this.lastStateSent > CFG.STATE_MS){
+      this.lastStateSent = time
+
+      if (time - this._lastVisibleCalc > 150){
+        this._lastVisibleCalc = time
+        this._visibleCache = {}
+        for (const pid of [this.myPeerId, ...this.peers]){
+          const viewer = this.worldPlayers[pid]
+          if (viewer){
+            this._visibleCache[pid] = this.ac.computeVisible(
+              pid, this.worldPlayers, this.wallRects, viewer
+            )
+          }
+        }
+      }
+
+      const sendMeta = (time - this.lastMetaSent > 500)
+      if (sendMeta) this.lastMetaSent = time
+
+      let scores = null, names = null, pickups = null
+      if (sendMeta){
+        scores = {}
+        for (const id in this.worldPlayers){
+          scores[id] = Math.round(this.worldPlayers[id].score || 0)
+        }
+        names = {}
+        for (const id in this.peerNames) names[id] = this.peerNames[id]
+        names[this.myPeerId] = this.myName
+        pickups = this.pickups.map(pk => [
+          pk.id, pk.type, Math.round(pk.x), Math.round(pk.y)
+        ])
+      }
+
+      for (const peerId of [this.myPeerId, ...this.peers]){
+        if (this.ac.bans.has(peerId)) continue
+        const visible = this._visibleCache[peerId]
+        if (!visible) continue
+        const pack = {}
+        for (const id of visible){
+          const w = this.worldPlayers[id]
+          if (!w) continue
+          const bn = w.bonuses || { rapidUntil:0, homingUntil:0, ricochetUntil:0, shieldHits:0, sprayerUntil:0 }
+          pack[id] = [
+            Math.round(w.x), Math.round(w.y),
+            Math.round(w.aimX*100)/100, Math.round(w.aimY*100)/100,
+            Math.round(w.hp), w.dead ? 1 : 0,
+            [
+              Math.max(0, Math.round((bn.rapidUntil||0) - now)),
+              Math.max(0, Math.round((bn.homingUntil||0) - now)),
+              Math.max(0, Math.round((bn.ricochetUntil||0) - now)),
+              bn.shieldHits || 0,
+              Math.max(0, Math.round((bn.sprayerUntil||0) - now)),
+            ],
+          ]
+        }
+        const payload = { p: pack }
+        if (sendMeta){ payload.scores = scores; payload.names = names; payload.pickups = pickups }
+        if (peerId === this.myPeerId) this.applyState(payload)
+        else this.sendState(payload, peerId)
+      }
+    }
+  }
+
+  /* ============================================================
+     HOST BROAD-PHASE: игроки по клеткам. Это убирает O(пули * игроков)
+     при обычных столкновениях и при homing-поиске цели.
+     ============================================================ */
+  rebuildPlayerGrid(){
+    const cell = 120
+    const grid = new Map()
+    for (const id in this.worldPlayers){
+      const p = this.worldPlayers[id]
+      if (!p || p.dead) continue
+      const cx = Math.floor(p.x / cell), cy = Math.floor(p.y / cell)
+      const key = cx + ',' + cy
+      let a = grid.get(key)
+      if (!a){ a = []; grid.set(key, a) }
+      a.push(id)
+    }
+    this._playerGrid = grid
+    this._playerGridCell = cell
+  }
+
+  nearbyPlayerIds(x, y){
+    const cell = this._playerGridCell || 120
+    const cx = Math.floor(x / cell), cy = Math.floor(y / cell)
+    const out = []
+    const grid = this._playerGrid
+    if (!grid) return out
+    for (let gy=cy-1; gy<=cy+1; gy++){
+      for (let gx=cx-1; gx<=cx+1; gx++){
+        const a = grid.get(gx + ',' + gy)
+        if (a) for (const id of a) out.push(id)
+      }
+    }
+    return out
+  }
+
+  hostSpawnBullet(ownerId, x, y, ax, ay, opts){
+    opts = opts || {}
+    const len = Math.hypot(ax, ay) || 1
+    const id = this.myPeerId + '-' + (++this.bulletSeq)
+    const b = {
+      id,
+      x: x + (ax/len)*(CFG.PLAYER_R+6),
+      y: y + (ay/len)*(CFG.PLAYER_R+6),
+      vx: (ax/len)*CFG.BULLET_SPEED,
+      vy: (ay/len)*CFG.BULLET_SPEED,
+      owner: ownerId, born: this.time.now,
+      homing: !!opts.homing,
+      bouncesLeft: opts.ricochet || 0,
+      damage: CFG.DAMAGE,
+      sprayer: false,
+    }
+    this.bullets.push(b)
+    const payload = {
+      id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, owner: ownerId,
+      homing: b.homing, ricochet: b.bouncesLeft, sprayer: false,
+    }
+    this.sendBullet(payload)
+    this.spawnGhostBullet(payload)
+  }
+
+  hostSpawnSprayer(ownerId, x, y, ax, ay){
+    const baseAngle = Math.atan2(ay, ax)
+    const spread = CFG.BONUS_SPRAYER_SPREAD_DEG * Math.PI / 180
+    const n = CFG.BONUS_SPRAYER_PELLETS
+    const dmg = CFG.DAMAGE * CFG.BONUS_SPRAYER_DAMAGE_MUL
+
+    for (let i = 0; i < n; i++){
+      const t = n === 1 ? 0.5 : i / (n - 1)
+      const jitter = (Math.random() - 0.5) * 0.04
+      const ang = baseAngle - spread/2 + spread * t + jitter
+      const pa = Math.cos(ang), pb = Math.sin(ang)
+
+      const id = this.myPeerId + '-' + (++this.bulletSeq)
+      const b = {
+        id,
+        x: x + pa * (CFG.PLAYER_R + 6),
+        y: y + pb * (CFG.PLAYER_R + 6),
+        vx: pa * CFG.BULLET_SPEED,
+        vy: pb * CFG.BULLET_SPEED,
+        owner: ownerId, born: this.time.now,
+        homing: false,
+        bouncesLeft: 0,
+        damage: dmg,
+        sprayer: true,
+      }
+      this.bullets.push(b)
+      const payload = {
+        id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, owner: ownerId,
+        homing: false, ricochet: 0, sprayer: true,
+      }
+      this.sendBullet(payload)
+      this.spawnGhostBullet(payload)
+    }
+  }
+
+  hostSpawnGrenade(ownerId, x, y, ax, ay, force){
+    const len = Math.hypot(ax, ay) || 1
+    const id = this.myPeerId + '-g-' + (++this.bulletSeq)
+    const speed = CFG.GRENADE_SPEED * (force || 1)
+    const b = {
+      id,
+      x: x + (ax/len)*(CFG.PLAYER_R+6),
+      y: y + (ay/len)*(CFG.PLAYER_R+6),
+      vx: (ax/len)*speed,
+      vy: (ay/len)*speed,
+      owner: ownerId,
+      born: this.time.now,
+      explodeAt: this.time.now + CFG.GRENADE_FUSE,
+      isGrenade: true,
+    }
+    this.bullets.push(b)
+    const payload = {
+      id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, owner: ownerId,
+      grenade: true,
+    }
+    this.sendBullet(payload)
+    this.spawnGhostBullet(payload)
+  }
+
+  hostExplodeGrenade(b, time){
+    const R = CFG.GRENADE_RADIUS
+    const R2 = R * R
+    const hits = []
+
+    for (const tid in this.worldPlayers){
+      const t = this.worldPlayers[tid]
+      if (t.dead) continue
+      const dx = t.x - b.x
+      const dy = t.y - b.y
+      const d2 = dx*dx + dy*dy
+      if (d2 > R2) continue
+
+      const dist = Math.sqrt(d2)
+      const falloff = 1 - dist / R
+      let dmg = CFG.GRENADE_DAMAGE * falloff
+      if (tid === b.owner) dmg *= CFG.GRENADE_SELF_DAMAGE_MUL
+      dmg = Math.round(dmg)
+      if (dmg < 1) continue
+
+      let blocked = false
+      if (t.bonuses && t.bonuses.shieldHits > 0){
+        t.bonuses.shieldHits--
+        blocked = true
+      } else {
+        t.hp -= dmg
+      }
+      let killed = false
+      if (!blocked && t.hp <= 0){
+        t.hp = 0
+        t.dead = true
+        t.respawnAt = time + CFG.RESPAWN
+        t.dashUntil = 0
+        killed = true
+        this.resetBonuses(t)
+        const shooter = this.worldPlayers[b.owner]
+        if (shooter) shooter.score = (shooter.score || 0) + 1
+      }
+      hits.push({ tid, hp: t.hp, dead: t.dead ? 1 : 0, blocked, killed, dmg })
+    }
+
+    const payload = {
+      id: b.id, owner: b.owner,
+      x: Math.round(b.x), y: Math.round(b.y),
+      r: R, hits,
+    }
+    this.sendExplosion(payload)
+    this.applyExplosion(payload)
+  }
+
+  updateGhostBullets(time, dt){
+    for (const id in this.ghostBullets){
+      const g = this.ghostBullets[id]
+
+      if (g.grenade){
+        const drag = Math.exp(-CFG.GRENADE_DRAG_K * dt)
+        g.vx *= drag
+        g.vy *= drag
+
+        let nx = g.sprite.x + g.vx * dt
+        let ny = g.sprite.y + g.vy * dt
+
+        let hitWall = false
+        for (const r of this.wallRects){
+          if (nx > r.x-CFG.GRENADE_R && nx < r.x+r.w+CFG.GRENADE_R &&
+              ny > r.y-CFG.GRENADE_R && ny < r.y+r.h+CFG.GRENADE_R){
+            hitWall = true
+            const rres = resolveCircleRect(nx, ny, CFG.GRENADE_R, r)
+            if (rres){ nx = rres.x; ny = rres.y }
+            break
+          }
+        }
+        if (hitWall){ g.vx = 0; g.vy = 0 }
+
+        g.sprite.x = nx
+        g.sprite.y = ny
+
+        if (time > g.explodeAt){
+          g.sprite.destroy()
+          delete this.ghostBullets[id]
+        }
+        continue
+      }
+
+      if (g.homing){
+        let nearest = null, nd = Infinity
+        for (const vid in this.views){
+          if (vid === this.myPeerId) continue
+          const v = this.views[vid]
+          if (!v || v.dead) continue
+          const dx = v.sprite.x - g.sprite.x
+          const dy = v.sprite.y - g.sprite.y
+          const d2 = dx*dx + dy*dy
+          if (d2 < nd){ nd = d2; nearest = v }
+        }
+        if (nearest){
+          const dx = nearest.sprite.x - g.sprite.x
+          const dy = nearest.sprite.y - g.sprite.y
+          const targetAngle = Math.atan2(dy, dx)
+          const curAngle = Math.atan2(g.vy, g.vx)
+          const noise = (Math.random() - 0.5) * CFG.BONUS_HOMING_NOISE
+          const wantAngle = targetAngle + noise
+          let diff = wantAngle - curAngle
+          while (diff > Math.PI) diff -= 2*Math.PI
+          while (diff < -Math.PI) diff += 2*Math.PI
+          const turn = Math.max(-CFG.BONUS_HOMING_TURN, Math.min(CFG.BONUS_HOMING_TURN, diff))
+          const speed = Math.hypot(g.vx, g.vy)
+          const newAngle = curAngle + turn
+          g.vx = Math.cos(newAngle) * speed
+          g.vy = Math.sin(newAngle) * speed
+        }
+      }
+
+      let nx = g.sprite.x + g.vx*dt
+      let ny = g.sprite.y + g.vy*dt
+
+      let hitWall = null
+      for (const r of this.wallRects){
+        if (nx > r.x-CFG.BULLET_R && nx < r.x+r.w+CFG.BULLET_R &&
+            ny > r.y-CFG.BULLET_R && ny < r.y+r.h+CFG.BULLET_R){ hitWall = r; break }
+      }
+
+      if (hitWall){
+        if (g.bouncesLeft > 0){
+          g.bouncesLeft--
+          const sp = this._spatial(g.sprite.x, g.sprite.y, 0.6)
+          this.sfx.ricochetTick(sp.pan, sp.vol)
+          const cx = hitWall.x + hitWall.w/2
+          const cy = hitWall.y + hitWall.h/2
+          const dx = nx - cx, dy = ny - cy
+          const halfW = hitWall.w/2 + CFG.BULLET_R
+          const halfH = hitWall.h/2 + CFG.BULLET_R
+          const overlapX = halfW - Math.abs(dx)
+          const overlapY = halfH - Math.abs(dy)
+          if (overlapX < overlapY){
+            g.vx = -g.vx
+            nx = g.sprite.x + Math.sign(dx || 1) * overlapX
+          } else {
+            g.vy = -g.vy
+            ny = g.sprite.y + Math.sign(dy || 1) * overlapY
+          }
+        } else {
+          g.sprite.destroy()
+          delete this.ghostBullets[id]
+          continue
+        }
+      }
+
+      g.sprite.x = nx
+      g.sprite.y = ny
+
+      if (time - g.born > CFG.BULLET_LIFE*1000){
+        g.sprite.destroy()
+        delete this.ghostBullets[id]
+      }
+    }
+  }
+
+  renderPlayers(time, dt){
+    const k = Math.min(1, dt*14)
+    for (const id in this.views){
+      if (id !== this.myPeerId && !this.peers.has(id)){
+        this.destroyView(id)
+        continue
+      }
+      const v = this.views[id]
+
+      if (id === this.myPeerId){
+        v.tx = this.local.x; v.ty = this.local.y
+        v.ta = Math.atan2(this.local.aimY, this.local.aimX)
+        v.hp = this.local.hp
+        v.dead = this.local.dead
+        if (!v.init){ v.init = true; v.sprite.x = v.tx; v.sprite.y = v.ty }
+        else { v.sprite.x = v.tx; v.sprite.y = v.ty }
+      } else if (v.buffer && v.buffer.length >= 2){
+        const renderTime = performance.now() - 100
+        let a = v.buffer[0], b = v.buffer[v.buffer.length-1]
+        for (let i = 0; i < v.buffer.length - 1; i++){
+          if (v.buffer[i].t <= renderTime && v.buffer[i+1].t > renderTime){
+            a = v.buffer[i]; b = v.buffer[i+1]; break
+          }
+        }
+        const span = Math.max(1, b.t - a.t)
+        const alpha = Math.min(1, Math.max(0, (renderTime - a.t) / span))
+        v.sprite.x = a.x + (b.x - a.x) * alpha
+        v.sprite.y = a.y + (b.y - a.y) * alpha
+        v.ta = Math.atan2(b.ay, b.ax)
+        v.hp = b.hp
+        v.dead = b.dead
+        v.init = true
+      } else {
+        if (!v.init){ v.init = true; v.sprite.x = v.tx; v.sprite.y = v.ty }
+        else {
+          v.sprite.x += (v.tx - v.sprite.x) * k
+          v.sprite.y += (v.ty - v.sprite.y) * k
+        }
+      }
+
+      /* Плавный поворот удалённых игроков: движение остаётся интерполированным,
+         а угол поворачивается по кратчайшей дуге без рывков. */
+      if (id !== this.myPeerId){
+        let da = v.ta - v.sprite.rotation
+        while (da > Math.PI) da -= Math.PI * 2
+        while (da < -Math.PI) da += Math.PI * 2
+        v.sprite.rotation += da * Math.min(1, dt * 10)
+      } else {
+        v.sprite.rotation = v.ta
+      }
+      const vis = !v.dead
+      v.sprite.setVisible(vis); v.bar.setVisible(vis)
+
+      if (v.shield){
+        let shields = 0
+        if (id === this.myPeerId){
+          shields = this.localBonuses[3] || 0
+        } else if (v.buffer && v.buffer.length){
+          const last = v.buffer[v.buffer.length - 1]
+          shields = (last.bn && last.bn[3]) || 0
+        }
+        v.shield.setPosition(v.sprite.x, v.sprite.y)
+        v.shield.setVisible(vis && shields > 0)
+      }
+
+      if (vis){
+        const bx = v.sprite.x - 20, by = v.sprite.y - 34
+        const w = 40 * (v.hp / CFG.MAX_HP)
+        v.bar.clear()
+        v.bar.fillStyle(0x000000, 0.6); v.bar.fillRect(bx-1, by-1, 42, 7)
+        v.bar.fillStyle(v.hp>50?0x3fb950:v.hp>25?0xd29922:0xf85149, 1)
+        v.bar.fillRect(bx, by, w, 5)
+        if (v.label){
+          const currentName = this.peerNames[id] || id.slice(0, 6)
+          if (v.label.text !== currentName) v.label.setText(currentName)
+          v.label.setPosition(v.sprite.x, v.sprite.y - 40)
+          v.label.setVisible(true)
+        }
+      } else {
+        if (v.label) v.label.setVisible(false)
+      }
+    }
+    const me = this.views[this.myPeerId]
+    if (me) this.cameras.main.centerOn(me.sprite.x, me.sprite.y)
+  }
+
+  onAntiCheatBan(id, reason, persistent){
+    if (reason === 'timeout' || reason === 'idle') return
+    if (this.ac.bans.has(id) && !persistent) return
+    this.ac.bans.add(id)
+    this.destroyView(id)
+    delete this.inputs[id]
+    delete this.worldPlayers[id]
+    delete this.scores[id]
+    delete this.peerNames[id]
+    this.peers.delete(id)
+    if (this.isHost){
+      const p = this.ac.peers.get(id)
+      for (const peerId of this.peers){
+        this.sendBan({ id, reason, pubHash: persistent ? (p?.pubHash || null) : null }, peerId)
+      }
+    }
+    this.updateStatus()
+  }
+}
+
+/* ============================================================
+   10. СТАРТ
+   ============================================================ */
+;(async ()=>{
+  const identity = new Identity()
+
+  try {
+    await Promise.race([
+      identity.init(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('identity outer timeout')), 4000)
+      )
+    ])
+  } catch(e){
+    DBG.warn('BOOT', 'identity init outer timeout/fail:', e.message)
+    if (!identity.ready){
+      let stored = localStorage.getItem('p2p_fallback_id')
+      if (!stored){
+        stored = randomToken(12)
+        localStorage.setItem('p2p_fallback_id', stored)
+      }
+      identity.pubHash = 'fb_' + stored
+      identity.mode = 'fallback'
+      identity.ready = true
+    }
+  }
+
+  try {
+    document.getElementById('pid').textContent =
+      `identity: ${identity.mode} · id: ${identity.pubHash}`
+  } catch(e){}
+
+  DBG.log('BOOT', 'identity ready:', identity.mode)
+
+  const sfx = new SoundEngine()
+
+  /* ============================================================
+     ЛОББИ: список открытых/закрытых комнат и создание комнат.
+     Список живёт на relay-сервере и показывает только активные комнаты.
+     ============================================================ */
+  let selectedPrivateLobby = null
+  let lobbySocket = null
+
+  function lobbyStatus(msg, error=false){
+    const el = document.getElementById('lobbyStatus')
+    if (el){ el.textContent = msg || ''; el.style.color = error ? '#f85149' : '#8b949e' }
+  }
+
+  function closeLobbySocket(){
+    try { if (lobbySocket) lobbySocket.close() } catch {}
+    lobbySocket = null
+  }
+
+  function lobbyRequest(payload, timeout=5000){
+    return new Promise((resolve,reject)=>{
+      let done = false
+      let ws
+      const finish = (err, value)=>{
+        if (done) return
+        done = true
+        try { ws?.close() } catch {}
+        err ? reject(err) : resolve(value)
+      }
+      try { ws = new WebSocket(RELAY_URL) }
+      catch(e){ reject(e); return }
+      const timer = setTimeout(()=>finish(new Error('timeout')), timeout)
+      ws.onopen = ()=>{
+        try { ws.send(JSON.stringify(payload)) }
+        catch(e){ clearTimeout(timer); finish(e) }
+      }
+      ws.onmessage = ev=>{
+        let msg
+        try { msg = JSON.parse(ev.data) } catch { return }
+        if (msg.type === 'lobbies' || msg.type === 'created' || msg.type === 'joined'){
+          clearTimeout(timer); finish(null, msg)
+        } else if (msg.type === 'error'){
+          clearTimeout(timer); finish(new Error(msg.msg || 'server error'))
+        }
+      }
+      ws.onerror = ()=>{ clearTimeout(timer); finish(new Error('connection error')) }
+      ws.onclose = ()=>{ if (!done){ clearTimeout(timer); finish(new Error('connection closed')) } }
+    })
+  }
+
+  async function refreshLobbies(){
+    lobbyStatus('Обновление списка…')
+    try {
+      const msg = await lobbyRequest({type:'list'})
+      const list = Array.isArray(msg.lobbies) ? msg.lobbies : []
+      const box = document.getElementById('lobbyList')
+      box.innerHTML = ''
+      if (!list.length){
+        box.innerHTML = '<div id="lobbyEmpty">Нет активных лобби. Создай первое!</div>'
+        lobbyStatus('Активных лобби: 0')
+        return
+      }
+      for (const r of list){
+        const row = document.createElement('div')
+        row.className = 'lobbyRow'
+        const locked = !!r.private
+        const full = Number(r.players) >= Number(r.maxPlayers || 12)
+        row.innerHTML = `
+          <div class="lobbyMain">
+            <div class="lobbyName">${escapeHtml(r.name || r.id)}</div>
+            <div class="lobbyMeta">#${escapeHtml(r.id)} · ${r.players}/${r.maxPlayers || 12} игроков</div>
+          </div>
+          <div class="lobbyLock">${locked ? '🔒' : '🌐'}</div>
+          <button class="lobbyJoin" ${full ? 'disabled' : ''}>${full ? 'ПОЛНО' : 'ВОЙТИ'}</button>
+        `
+        row.querySelector('.lobbyJoin').addEventListener('click', ()=>{
+          if (locked){
+            selectedPrivateLobby = r
+            document.getElementById('privatePassword').value = ''
+            document.getElementById('privateJoinBox').style.display = 'flex'
+            lobbyStatus('Введите пароль для «' + (r.name || r.id) + '»')
+            document.getElementById('privatePassword').focus()
+          } else {
+            startGame(r.id, '', r.name || r.id)
+          }
+        })
+        box.appendChild(row)
+      }
+      lobbyStatus('Активных лобби: ' + list.length)
+    } catch(e){
+      lobbyStatus('Не удалось получить список лобби: ' + (e.message || e), true)
+      document.getElementById('lobbyList').innerHTML =
+        '<div id="lobbyEmpty">Сервер лобби недоступен.</div>'
+    }
+  }
+
+  async function createLobby(){
+    const rawName = document.getElementById('nameInput').value || ''
+    const playerName = cleanName(rawName) || ('Player' + Math.floor(Math.random()*999))
+    const lobbyName = String(document.getElementById('newLobbyName').value || '').trim().slice(0,24)
+    const kind = document.getElementById('newLobbyType').value
+    const password = String(document.getElementById('newLobbyPassword').value || '').trim().slice(0,32)
+
+    if (!lobbyName){ lobbyStatus('Укажи название лобби.', true); return }
+    if (kind === 'private' && !password){
+      lobbyStatus('Для закрытого лобби нужен пароль.', true); return
+    }
+
+    lobbyStatus('Создание лобби…')
+    try {
+      const msg = await lobbyRequest({
+        type:'create',
+        name:lobbyName,
+        private:kind === 'private',
+        password
+      })
+      document.getElementById('newLobbyName').value = ''
+      document.getElementById('newLobbyPassword').value = ''
+      lobbyStatus('Лобби создано.')
+      startGame(msg.room, password, lobbyName)
+    } catch(e){
+      lobbyStatus('Не удалось создать лобби: ' + (e.message || e), true)
+    }
+  }
+
+  async function joinPrivateLobby(){
+    if (!selectedPrivateLobby) return
+    const password = String(document.getElementById('privatePassword').value || '').trim()
+    if (!password){ lobbyStatus('Введите пароль.', true); return }
+    startGame(selectedPrivateLobby.id, password, selectedPrivateLobby.name || selectedPrivateLobby.id)
+  }
+
+  function startGame(roomId, roomPassword='', lobbyName=''){
+    const rawName = document.getElementById('nameInput').value || ''
+    const name = cleanName(rawName) || ('Player' + Math.floor(Math.random()*999))
+    DBG.log('BOOT', 'starting lobby:', roomId, 'name:', name, 'lobby:', lobbyName)
+    closeLobbySocket()
+    document.getElementById('menu').style.display = 'none'
+    document.getElementById('privateJoinBox').style.display = 'none'
+
+    try {
+      sfx.init()
+      sfx.startAmbient()
+    } catch(e){}
+
+    new Phaser.Game({
+      type: Phaser.AUTO,
+      parent: 'game',
+      backgroundColor: '#05070d',
+      scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+      render: { antialias:false, pixelArt:false, roundPixels:true },
+      fps: { target:45, min:25 },
+      scene: [BootScene, GameScene],
+      callbacks: {
+        preBoot: (game)=>{
+          game.registry.set('roomId', roomId)
+          game.registry.set('roomPassword', roomPassword)
+          game.registry.set('identity', identity)
+          game.registry.set('playerName', name)
+          game.registry.set('sfx', sfx)
+          game.registry.set('lobbyName', lobbyName)
+        }
+      },
+    })
+  }
+
+  document.getElementById('refreshLobbies').addEventListener('click', refreshLobbies)
+  document.getElementById('createLobbyBtn').addEventListener('click', createLobby)
+  document.getElementById('privateJoinBtn').addEventListener('click', joinPrivateLobby)
+  document.getElementById('newLobbyType').addEventListener('change', ()=>{
+    document.getElementById('newLobbyPassword').style.display =
+      document.getElementById('newLobbyType').value === 'private' ? 'block' : 'none'
+  })
+  document.getElementById('privatePassword').addEventListener('keydown', e=>{
+    if (e.key === 'Enter') joinPrivateLobby()
+  })
+
+  refreshLobbies()
+  DBG.log('BOOT', 'lobby browser ready')
+})()
+</script>
+</body>
+  </html>
