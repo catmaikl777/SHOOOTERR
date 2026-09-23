@@ -55,7 +55,7 @@ function mulberry32(a){
   };
 }
 
-function generateWalls(seed){
+function generateWalls(seed, type){
   const rng=mulberry32(hashStr(seed));
   const cs=CFG.CELL;
   const cols=Math.floor(CFG.W/cs);
@@ -96,6 +96,39 @@ function generateWalls(seed){
       if(cc>=cols-1||rr>=rows-1)break;
       if(!near(cc*cs+cs/2,rr*cs+cs/2)){
         push(cc,rr);
+      }
+    }
+  }
+
+  // Дополнительные стены для особых типов комнат
+  if(type === 'moving_walls'){
+    // Добавляем дополнительные стены, которые будут двигаться/вращаться
+    for(let i=0;i<15;i++){
+      const c=3+Math.floor(rng()*(cols-6));
+      const r=3+Math.floor(rng()*(rows-6));
+      const len=1+Math.floor(rng()*4);
+      const hor=rng()<.5;
+      for(let j=0;j<len;j++){
+        const cc=hor?c+j:c, rr=hor?r:r+j;
+        if(cc>=cols-1||rr>=rows-1)break;
+        if(!near(cc*cs+cs/2,rr*cs+cs/2)){
+          push(cc,rr);
+        }
+      }
+    }
+  } else if(type === 'portals'){
+    // Добавляем чуть больше стен для портальной комнаты
+    for(let i=0;i<10;i++){
+      const c=3+Math.floor(rng()*(cols-6));
+      const r=3+Math.floor(rng()*(rows-6));
+      const len=1+Math.floor(rng()*2);
+      const hor=rng()<.5;
+      for(let j=0;j<len;j++){
+        const cc=hor?c+j:c, rr=hor?r:r+j;
+        if(cc>=cols-1||rr>=rows-1)break;
+        if(!near(cc*cs+cs/2,rr*cs+cs/2)){
+          push(cc,rr);
+        }
       }
     }
   }
@@ -586,7 +619,17 @@ function playerPack(room,now,viewerId){
     p,
     scores,
     names,
-    pickups
+    pickups,
+    roomData: {
+      type: room.type || 'basic',
+      portals: room.portals.map(p => ({x:Math.round(p.x), y:Math.round(p.y), pair:p.pair, active:p.active})),
+      movingWalls: room.movingWalls.map(mw => ({
+        wallIndex: mw.wallIndex,
+        kind: mw.kind,
+        angle: Math.round(mw.angle * 1000) / 1000,
+        offset: Math.round(mw.offset * 100) / 100,
+      }))
+    }
   };
 }
 
@@ -838,6 +881,39 @@ function explode(room,b,now){
 // =========================
 
 function tickRoom(room,now,dt){
+
+  // Обновление движущихся стен
+  for(const mw of room.movingWalls){
+    if(mw.kind === 'rotate'){
+      mw.angle += mw.angleSpeed;
+    } else {
+      mw.offset += mw.offsetSpeed * dt;
+      if(Math.abs(mw.offset) > mw.offsetRange) mw.offsetSpeed *= -1;
+    }
+  }
+
+  // Порталы: телепортация игроков
+  if(room.portals.length > 0){
+    for(const p of room.players.values()){
+      if(p.dead) continue;
+      for(const portal of room.portals){
+        const dx = p.x - portal.x;
+        const dy = p.y - portal.y;
+        if(dx*dx + dy*dy < 60*60){
+          // Найти портал-пару
+          const pair = portal.pair === 'a' ? 'b' : 'a';
+          const target = room.portals.find(pt => pt.pair === pair && pt !== portal);
+          if(target){
+            p.x = target.x;
+            p.y = target.y;
+            p.vx = 0;
+            p.vy = 0;
+            break;
+          }
+        }
+      }
+    }
+  }
 
   // Players
   for(const p of room.players.values()){
@@ -1382,7 +1458,6 @@ function tickRoom(room,now,dt){
 
     room.lastState=now;
 
-
     // Player state
     for(const ws of room.clients){
 
@@ -1593,7 +1668,8 @@ function lobbyList(){
       name:meta.name||id,
       private:!!meta.private,
       players,
-      maxPlayers:MAX_PLAYERS
+      maxPlayers:MAX_PLAYERS,
+      type: meta.type || 'basic'
     });
   }
 
@@ -1644,7 +1720,8 @@ function ensureRoom(
   meta={
     name:roomId,
     private:false,
-    password:''
+    password:'',
+    type:'basic'
   }
 ){
 
@@ -1653,6 +1730,8 @@ function ensureRoom(
 
   if(!room){
 
+    const type = meta.type || 'basic';
+
     room={
       id:roomId,
       clients:new Set(),
@@ -1660,11 +1739,50 @@ function ensureRoom(
       bullets:[],
       pickups:[],
       pickupSeq:0,
-      walls:generateWalls(roomId),
+      walls:generateWalls(roomId, type),
       lastPickup:Date.now(),
       lastState:0,
-      lastTick:Date.now()
+      lastTick:Date.now(),
+      type:type,
+      portals:[],
+      movingWalls:[],
     };
+
+    if(type === 'portals'){
+      const prng=mulberry32(hashStr(roomId+'_portals'));
+      for(let i=0;i<4;i++){
+        const px = 150 + Math.floor(prng()*(CFG.W-300));
+        const py = 150 + Math.floor(prng()*(CFG.H-300));
+        room.portals.push({x:px, y:py, pair: i%2===0?'a':'b', active:true});
+      }
+    } else if(type === 'moving_walls'){
+      const mrng=mulberry32(hashStr(roomId+'_moving'));
+      const movableWalls = room.walls.filter(w => !(w.w===CFG.CELL && (w.x===0||w.y===0||w.x+w.w===CFG.W||w.y+w.h===CFG.H)));
+      const count = Math.min(8, movableWalls.length);
+      const usedWalls = new Set();
+      for(let i=0;i<count;i++){
+        let idx = Math.floor(mrng()*movableWalls.length);
+        let attempts = 0;
+        while(usedWalls.has(idx) && attempts < 20){
+          idx = Math.floor(mrng()*movableWalls.length);
+          attempts++;
+        }
+        if(usedWalls.has(idx)) continue;
+        usedWalls.add(idx);
+        const w = movableWalls[idx];
+        if(!w) continue;
+        room.movingWalls.push({
+          wallIndex: idx,
+          wall: w,
+          kind: mrng() < 0.5 ? 'rotate' : 'translate',
+          angle: 0,
+          angleSpeed: (mrng()-0.5)*0.02,
+          offset: 0,
+          offsetSpeed: (mrng()-0.5)*2,
+          offsetRange: 20 + mrng()*30,
+        });
+      }
+    }
 
     rooms.set(
       roomId,
@@ -1786,6 +1904,7 @@ wss.on(
           }
 
           const priv=!!msg.private;
+          const roomType = msg.roomType || 'basic';
 
           const password=
             String(
@@ -1812,7 +1931,8 @@ wss.on(
             {
               name,
               private:priv,
-              password
+              password,
+              type: roomType
             }
           );
 
@@ -1822,7 +1942,8 @@ wss.on(
               type:'created',
               room:id,
               name,
-              private:priv
+              private:priv,
+              roomType: roomType
             }
           );
 
@@ -1852,15 +1973,16 @@ wss.on(
             return;
           }
 
-          const room=
-            ensureRoom(rid);
-
           const meta=
             roomMeta.get(rid)||{
               name:rid,
               private:false,
-              password:''
+              password:'',
+              type:'basic'
             };
+
+          const room=
+            ensureRoom(rid, meta);
 
           if(
             meta.private &&
@@ -1922,10 +2044,12 @@ wss.on(
               ][0]?.peerId||
                 ws.peerId,
               authoritative:true,
+              roomType: room.type || 'basic',
               lobby:{
                 id:rid,
                 name:meta.name,
-                private:!!meta.private
+                private:!!meta.private,
+                type: meta.type || 'basic'
               }
             }
           );

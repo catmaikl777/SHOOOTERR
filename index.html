@@ -271,6 +271,11 @@
         <option value="private">🔒 Закрытое</option>
       </select>
       <input id="newLobbyPassword" placeholder="пароль (для закрытого)" maxlength="32" style="display:none" />
+      <select id="newRoomType">
+        <option value="basic">🗺 Базовая</option>
+        <option value="portals">🌀 Порталы</option>
+        <option value="moving_walls">🔄 Движ. стены</option>
+      </select>
       <button id="createLobbyBtn">СОЗДАТЬ</button>
     </div>
 
@@ -1051,7 +1056,7 @@ const SPAWNS = [
   {x:120,y:CFG.H-120},{x:CFG.W-120,y:CFG.H-120},
   {x:CFG.W/2,y:120},{x:CFG.W/2,y:CFG.H-120},
 ]
-function generateWalls(seedStr){
+function generateWalls(seedStr, type){
   const rng = mulberry32(hashStr(seedStr))
   const cs = CFG.CELL
   const cols = Math.floor(CFG.W/cs), rows = Math.floor(CFG.H/cs)
@@ -1070,6 +1075,34 @@ function generateWalls(seedStr){
       if (cc >= cols-1 || rr >= rows-1) break
       if (nearSpawn(cc*cs+cs/2, rr*cs+cs/2)) continue
       push(cc, rr)
+    }
+  }
+  // Дополнительные стены для особых типов комнат
+  if (type === 'moving_walls'){
+    for(let i=0;i<15;i++){
+      const c = 3 + Math.floor(rng()*(cols-6))
+      const r = 3 + Math.floor(rng()*(rows-6))
+      const len = 1 + Math.floor(rng()*4)
+      const horiz = rng() < 0.5
+      for (let j=0;j<len;j++){
+        const cc = horiz ? c+j : c, rr = horiz ? r : r+j
+        if (cc >= cols-1 || rr >= rows-1) break
+        if (nearSpawn(cc*cs+cs/2, rr*cs+cs/2)) continue
+        push(cc, rr)
+      }
+    }
+  } else if (type === 'portals'){
+    for(let i=0;i<10;i++){
+      const c = 3 + Math.floor(rng()*(cols-6))
+      const r = 3 + Math.floor(rng()*(rows-6))
+      const len = 1 + Math.floor(rng()*2)
+      const horiz = rng() < 0.5
+      for (let j=0;j<len;j++){
+        const cc = horiz ? c+j : c, rr = horiz ? r : r+j
+        if (cc >= cols-1 || rr >= rows-1) break
+        if (nearSpawn(cc*cs+cs/2, rr*cs+cs/2)) continue
+        push(cc, rr)
+      }
     }
   }
   return out
@@ -1117,6 +1150,7 @@ class GameScene extends Phaser.Scene {
     this.identity = this.registry.get('identity')
     this.myName = this.registry.get('playerName') || 'anon'
     this.sfx = this.registry.get('sfx')
+    this.roomType = this.registry.get('roomType') || 'basic'
 
     this.floorSprite = this.add.tileSprite(0, 0, CFG.W, CFG.H, 'floor')
       .setOrigin(0).setDepth(-20).setTint(CFG.FLOOR_COLOR).setAlpha(CFG.FLOOR_TINT_ALPHA)
@@ -1125,8 +1159,9 @@ class GameScene extends Phaser.Scene {
         .setBlendMode(Phaser.BlendModes.ADD).setDepth(-19)
     }
 
-    this.wallRects = generateWalls(this.roomId)
+    this.wallRects = generateWalls(this.roomId, this.roomType)
     this.wallSprites = []
+    this.movingWallSprites = []
     if (CFG.WALL_GLOW){
       for (const r of this.wallRects){
         this.add.image(r.x + r.w/2, r.y + r.h/2, 'wall')
@@ -1137,6 +1172,70 @@ class GameScene extends Phaser.Scene {
     for (const r of this.wallRects){
       this.wallSprites.push(this.add.image(r.x, r.y, 'wall')
         .setOrigin(0).setDepth(-10).setDisplaySize(r.w, r.h).setTintFill(CFG.WALL_COLOR))
+    }
+
+    // Порталы
+    this.portals = []
+    this.portalData = []
+    this._portalVisuals = []
+    if (this.roomType === 'portals'){
+      const prng = mulberry32(hashStr(this.roomId + '_portals'))
+      this._portalVisuals = []
+      this.portalData = []
+      for(let i=0;i<4;i++){
+        const px = 150 + Math.floor(prng()*(CFG.W-300))
+        const py = 150 + Math.floor(prng()*(CFG.H-300))
+        const pair = i%2===0?'a':'b'
+        this.portals.push({x:px, y:py, pair:pair, active:true})
+        this.portalData.push({x:px, y:py, pair:pair, active:true})
+        const color = pair === 'a' ? 0x00ffff : 0xff00ff
+        const glow = this.add.circle(px + 20, py + 20, 25, color, 0.4)
+          .setDepth(-5).setAlpha(0.5)
+        const sprite = this.add.circle(px + 20, py + 20, 18, color, 0.7)
+          .setDepth(-4).setAlpha(0.8)
+        const text = this.add.text(px + 20, py + 20, pair.toUpperCase(), {
+          fontFamily: 'monospace', fontSize: '14px', color: '#ffffff'
+        }).setOrigin(0.5).setDepth(-3)
+        this._portalVisuals.push({glow, sprite, text, data:{x:px, y:py, pair:pair}})
+      }
+    }
+
+    // Движущиеся стены
+    this.movingWalls = []
+    if (this.roomType === 'moving_walls'){
+      const mrng = mulberry32(hashStr(this.roomId + '_moving'))
+      const movableWalls = this.wallRects.filter(w => !(w.w===CFG.CELL && (w.x===0||w.y===0||w.x+w.w===CFG.W||w.y+w.h===CFG.H)))
+      const count = Math.min(8, movableWalls.length)
+      const usedWalls = new Set()
+      for(let i=0;i<count;i++){
+        let idx = Math.floor(mrng*movableWalls.length)
+        let attempts = 0
+        while(usedWalls.has(idx) && attempts < 20){
+          idx = Math.floor(mrng*movableWalls.length)
+          attempts++
+        }
+        if(usedWalls.has(idx)) continue
+        usedWalls.add(idx)
+        const w = movableWalls[idx]
+        if(!w) continue
+        const kind = mrng() < 0.5 ? 'rotate' : 'translate'
+        this.movingWalls.push({
+          wallIndex: idx,
+          wall: w,
+          kind: kind,
+          angle: 0,
+          angleSpeed: (mrng()-0.5)*0.02,
+          offset: 0,
+          offsetSpeed: (mrng()-0.5)*2,
+          offsetRange: 20 + mrng()*30,
+        })
+        const mwSprite = this.add.image(w.x, w.y, 'wall')
+          .setOrigin(0).setDepth(-10).setDisplaySize(w.w, w.h).setTintFill(0xffaa33)
+        if(kind === 'rotate'){
+          mwSprite.setOrigin(0.5, 0.5)
+        }
+        this.movingWallSprites.push({sprite:mwSprite, data:this.movingWalls[this.movingWalls.length-1]})
+      }
     }
 
     this.cameras.main.setBounds(0, 0, CFG.W, CFG.H)
@@ -1537,7 +1636,7 @@ class GameScene extends Phaser.Scene {
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0
-      this.ws.send(JSON.stringify({ type: 'join', room: this.roomId, password: this.roomPassword || '' }))
+      this.ws.send(JSON.stringify({ type: 'join', room: this.roomId, password: this.roomPassword || '', roomType: this.roomType || 'basic' }))
     }
 
     this.ws.onmessage = ev => {
@@ -1557,6 +1656,8 @@ class GameScene extends Phaser.Scene {
         this.migrateMyId(msg.peerId)
         this.isHost = false
         this.hasBecomeClient = true
+        this.roomType = msg.roomType || this.roomType || 'basic'
+        this.registry.set('roomType', this.roomType)
         for (const peerId of (msg.peers || [])){
           if (peerId === this.myPeerId) continue
           this.peers.add(peerId)
@@ -1928,6 +2029,71 @@ class GameScene extends Phaser.Scene {
     this.worldPlayers = {}
     this.pickups = []
     this.lastPickupSpawn = 0
+    this.portals = []
+    this.movingWalls = []
+    this.movingWallSprites = []
+    this.portalData = []
+    this._portalVisuals = []
+    this.movingWallData = []
+    const roomType = this.roomType || 'basic'
+    // Генерация порталов
+    if (roomType === 'portals'){
+      const prng = mulberry32(hashStr(this.roomId + '_portals'))
+      this._portalVisuals = []
+      this.portalData = []
+      for(let i=0;i<4;i++){
+        const px = 150 + Math.floor(prng()*(CFG.W-300))
+        const py = 150 + Math.floor(prng()*(CFG.H-300))
+        const pair = i%2===0?'a':'b'
+        this.portals.push({x:px, y:py, pair:pair, active:true})
+        this.portalData.push({x:px, y:py, pair:pair, active:true})
+        const color = pair === 'a' ? 0x00ffff : 0xff00ff
+        const glow = this.add.circle(px + 20, py + 20, 25, color, 0.4)
+          .setDepth(-5).setAlpha(0.5)
+        const sprite = this.add.circle(px + 20, py + 20, 18, color, 0.7)
+          .setDepth(-4).setAlpha(0.8)
+        const text = this.add.text(px + 20, py + 20, pair.toUpperCase(), {
+          fontFamily: 'monospace', fontSize: '14px', color: '#ffffff'
+        }).setOrigin(0.5).setDepth(-3)
+        this._portalVisuals.push({glow, sprite, text, data:{x:px, y:py, pair:pair}})
+      }
+    }
+    // Генерация движущихся стен
+    if (roomType === 'moving_walls'){
+      const mrng = mulberry32(hashStr(this.roomId + '_moving'))
+      const movableWalls = this.wallRects.filter(w => !(w.w===CFG.CELL && (w.x===0||w.y===0||w.x+w.w===CFG.W||w.y+w.h===CFG.H)))
+      const count = Math.min(8, movableWalls.length)
+      const usedWalls = new Set()
+      for(let i=0;i<count;i++){
+        let idx = Math.floor(mrng*movableWalls.length)
+        let attempts = 0
+        while(usedWalls.has(idx) && attempts < 20){
+          idx = Math.floor(mrng*movableWalls.length)
+          attempts++
+        }
+        if(usedWalls.has(idx)) continue
+        usedWalls.add(idx)
+        const w = movableWalls[idx]
+        if(!w) continue
+        const kind = mrng() < 0.5 ? 'rotate' : 'translate'
+        this.movingWalls.push({
+          wallIndex: idx,
+          wall: w,
+          kind: kind,
+          angle: 0,
+          angleSpeed: (mrng()-0.5)*0.02,
+          offset: 0,
+          offsetSpeed: (mrng()-0.5)*2,
+          offsetRange: 20 + mrng()*30,
+        })
+        const mwSprite = this.add.image(w.x, w.y, 'wall')
+          .setOrigin(0).setDepth(-10).setDisplaySize(w.w, w.h).setTintFill(0xffaa33)
+        if(kind === 'rotate'){
+          mwSprite.setOrigin(0.5, 0.5)
+        }
+        this.movingWallSprites.push({sprite:mwSprite, data:this.movingWalls[this.movingWalls.length-1]})
+      }
+    }
     const ids = [this.myPeerId, ...this.peers].filter(id => id && !this.ac.bans.has(id))
     for (const id of ids){
       const v = this.views[id]
@@ -2028,7 +2194,9 @@ class GameScene extends Phaser.Scene {
       if (v > 0 && v < 5000 && v > ping) ping = v
     }
     ping = Math.round(ping)
-    this.statusEl.textContent = `${role} · ${myName} · ${this.roomId} · игроков: ${n} · HP: ${hp} · очки: ${sc} · ping: ${ping}ms`
+    const typeEmoji = {basic:'🗺', portals:'🌀', moving_walls:'🔄'}
+    const typeIcon = typeEmoji[this.roomType] || '🗺'
+    this.statusEl.textContent = `${role} · ${myName} · ${this.roomId} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc} · ping: ${ping}ms`
   }
 
   renderBonuses(){
@@ -2092,6 +2260,20 @@ class GameScene extends Phaser.Scene {
       }
     }
     if (data.pickups) this.syncPickups(data.pickups)
+
+    if (data.roomData){
+      this.roomType = data.roomData.type || this.roomType
+      if (data.roomData.portals){
+        this.portalData = data.roomData.portals
+        if (!this.portals) this.portals = []
+        this.portals = this.portalData.map(p => ({...p}))
+        this._updatePortalSprites()
+      }
+      if (data.roomData.movingWalls){
+        this.movingWallData = data.roomData.movingWalls
+        this._updateMovingWallSprites(data.roomData.movingWalls)
+      }
+    }
 
     const now = performance.now()
     for (const id in data.p){
@@ -2403,6 +2585,32 @@ class GameScene extends Phaser.Scene {
     this.local.y = this.predicted.y
     this.local.aimX = this.aimVec.x
     this.local.aimY = this.aimVec.y
+
+    // Порталы: проверяем телепортацию локального игрока
+    if (this.roomType === 'portals' && this.portals){
+      for (const portal of this.portals){
+        const dx = this.local.x - portal.x - CFG.CELL/2
+        const dy = this.local.y - portal.y - CFG.CELL/2
+        if (dx*dx + dy*dy < 30*30){
+          // Телепортируем к парному порталу
+          const pair = portal.pair === 'a' ? 'b' : 'a'
+          const target = this.portals.find(pt => pt.pair === pair && pt !== portal)
+          if (target){
+            this.predicted.x = target.x + CFG.CELL/2
+            this.predicted.y = target.y + CFG.CELL/2
+            this.local.x = this.predicted.x
+            this.local.y = this.predicted.y
+            this.sfx.respawn(0, 1)
+            break
+          }
+        }
+      }
+    }
+
+    // Анимация движущихся стен
+    if (this.roomType === 'moving_walls'){
+      this._animateMovingWalls(time, dt)
+    }
 
     if (time - this._lastPing > 5000){
       this._lastPing = time
@@ -3201,6 +3409,62 @@ class GameScene extends Phaser.Scene {
     if (me) this.cameras.main.centerOn(me.sprite.x, me.sprite.y)
   }
 
+  _animateMovingWalls(time, dt){
+    if (!this.movingWallSprites) return
+    for (let i = 0; i < this.movingWallSprites.length; i++){
+      const entry = this.movingWallSprites[i]
+      const mw = entry.data
+      if (!mw) continue
+      if (mw.kind === 'rotate'){
+        mw.angle += mw.angleSpeed
+        entry.sprite.setAngle(mw.angle * 180 / Math.PI)
+      } else {
+        mw.offset += mw.offsetSpeed * dt
+        if (Math.abs(mw.offset) > mw.offsetRange) mw.offsetSpeed *= -1
+        const w = mw.wall
+        entry.sprite.x = w.x + mw.offset
+        entry.sprite.y = w.y + mw.offset
+      }
+    }
+  }
+
+  _updatePortalSprites(){
+    if (!this.portals) return
+    // Remove old portal visuals and recreate
+    for (const ps of (this._portalVisuals || [])){
+      ps.glow?.destroy()
+      ps.sprite?.destroy()
+      ps.text?.destroy()
+    }
+    this._portalVisuals = []
+    for (let i = 0; i < this.portals.length; i++){
+      const portal = this.portals[i]
+      const color = portal.pair === 'a' ? 0x00ffff : 0xff00ff
+      const glow = this.add.circle(portal.x + 20, portal.y + 20, 25, color, 0.4)
+        .setDepth(-5).setAlpha(0.5)
+      const sprite = this.add.circle(portal.x + 20, portal.y + 20, 18, color, 0.7)
+        .setDepth(-4).setAlpha(0.8)
+      const text = this.add.text(portal.x + 20, portal.y + 20, portal.pair.toUpperCase(), {
+        fontFamily: 'monospace', fontSize: '14px', color: '#ffffff'
+      }).setOrigin(0.5).setDepth(-3)
+      this._portalVisuals.push({glow, sprite, text, data:portal})
+    }
+  }
+
+  _updateMovingWallSprites(wallData){
+    if (!wallData) return
+    for (const mwData of wallData){
+      const idx = mwData.wallIndex
+      if (!this.wallSprites[idx]) continue
+      if (mwData.kind === 'rotate'){
+        this.wallSprites[idx].setAngle(mwData.angle * 180 / Math.PI)
+        this.wallSprites[idx].setOrigin(0.5, 0.5)
+      } else {
+        this.wallSprites[idx].setOrigin(0, 0)
+      }
+    }
+  }
+
   onAntiCheatBan(id, reason, persistent){
     if (reason === 'timeout' || reason === 'idle') return
     if (this.ac.bans.has(id) && !persistent) return
@@ -3322,10 +3586,12 @@ class GameScene extends Phaser.Scene {
         row.className = 'lobbyRow'
         const locked = !!r.private
         const full = Number(r.players) >= Number(r.maxPlayers || 12)
+        const typeEmoji = {basic:'🗺', portals:'🌀', moving_walls:'🔄'}
+      const roomTypeIcon = typeEmoji[r.type] || '🗺'
         row.innerHTML = `
           <div class="lobbyMain">
             <div class="lobbyName">${escapeHtml(r.name || r.id)}</div>
-            <div class="lobbyMeta">#${escapeHtml(r.id)} · ${r.players}/${r.maxPlayers || 12} игроков</div>
+            <div class="lobbyMeta">#${escapeHtml(r.id)} · ${r.players}/${r.maxPlayers || 12} игроков · ${roomTypeIcon}</div>
           </div>
           <div class="lobbyLock">${locked ? '🔒' : '🌐'}</div>
           <button class="lobbyJoin" ${full ? 'disabled' : ''}>${full ? 'ПОЛНО' : 'ВОЙТИ'}</button>
@@ -3338,7 +3604,7 @@ class GameScene extends Phaser.Scene {
             lobbyStatus('Введите пароль для «' + (r.name || r.id) + '»')
             document.getElementById('privatePassword').focus()
           } else {
-            startGame(r.id, '', r.name || r.id)
+            startGame(r.id, '', r.name || r.id, r.type || 'basic')
           }
         })
         box.appendChild(row)
@@ -3357,6 +3623,7 @@ class GameScene extends Phaser.Scene {
     const lobbyName = String(document.getElementById('newLobbyName').value || '').trim().slice(0,24)
     const kind = document.getElementById('newLobbyType').value
     const password = String(document.getElementById('newLobbyPassword').value || '').trim().slice(0,32)
+    const roomType = document.getElementById('newRoomType').value
 
     if (!lobbyName){ lobbyStatus('Укажи название лобби.', true); return }
     if (kind === 'private' && !password){
@@ -3369,12 +3636,13 @@ class GameScene extends Phaser.Scene {
         type:'create',
         name:lobbyName,
         private:kind === 'private',
-        password
+        password,
+        roomType: roomType
       })
       document.getElementById('newLobbyName').value = ''
       document.getElementById('newLobbyPassword').value = ''
       lobbyStatus('Лобби создано.')
-      startGame(msg.room, password, lobbyName)
+      startGame(msg.room, password, lobbyName, roomType)
     } catch(e){
       lobbyStatus('Не удалось создать лобби: ' + (e.message || e), true)
     }
@@ -3384,10 +3652,10 @@ class GameScene extends Phaser.Scene {
     if (!selectedPrivateLobby) return
     const password = String(document.getElementById('privatePassword').value || '').trim()
     if (!password){ lobbyStatus('Введите пароль.', true); return }
-    startGame(selectedPrivateLobby.id, password, selectedPrivateLobby.name || selectedPrivateLobby.id)
+    startGame(selectedPrivateLobby.id, password, selectedPrivateLobby.name || selectedPrivateLobby.id, selectedPrivateLobby.type || 'basic')
   }
 
-  function startGame(roomId, roomPassword='', lobbyName=''){
+  function startGame(roomId, roomPassword='', lobbyName='', roomType='basic'){
     const rawName = document.getElementById('nameInput').value || ''
     const name = cleanName(rawName) || ('Player' + Math.floor(Math.random()*999))
     DBG.log('BOOT', 'starting lobby:', roomId, 'name:', name, 'lobby:', lobbyName)
@@ -3416,6 +3684,7 @@ class GameScene extends Phaser.Scene {
           game.registry.set('playerName', name)
           game.registry.set('sfx', sfx)
           game.registry.set('lobbyName', lobbyName)
+          game.registry.set('roomType', roomType)
         }
       },
     })
