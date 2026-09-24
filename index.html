@@ -1507,7 +1507,7 @@ class GameScene extends Phaser.Scene {
     this.myReady = v
     this.readyBtn.disabled = v
     this.readyBtn.textContent = v ? '✓ ГОТОВ' : 'В БОЙ'
-    this.sendServer({ a:'ready', d:{ color:this.myColor, ready:!!v } })
+    this.sendServer('ready', { color:this.myColor, ready:!!v })
   }
 
   updatePregameStatus(readyCount, total){
@@ -1929,7 +1929,7 @@ class GameScene extends Phaser.Scene {
         this.matchData = { ...this.matchData, scoreLimit:this.scoreLimit, started: !!(msg.lobby && msg.lobby.started) }
         this.registry.set('roomType', this.roomType)
         if (this.matchData.started) this.hidePregame()
-        if (this.myPeerId) this.sendServer({ a:'ready', d:{ color:this.myColor, ready:false } })
+        if (this.myPeerId) this.sendServer('ready', { color:this.myColor, ready:false })
         for (const peerId of (msg.peers || [])){
           if (peerId === this.myPeerId) continue
           this.peers.add(peerId)
