@@ -37,6 +37,7 @@ const ROOM_TYPES=new Set(['basic','king_of_hill','delivery']);
 
 const CART_START={x:220,y:CFG.H/2};
 const CART_END={x:CFG.W-220,y:CFG.H/2};
+const CART_CX=Math.round((CART_START.x+CART_END.x)/2);
 const CART_CONTROL_R=72;
 const CART_SPEED=62;
 
@@ -507,6 +508,14 @@ function checkMatchEnd(room){
 function handleKill(room,killer,victim,now){
   if(!killer||killer.id===victim.id)return;
 
+  killer.totalKills=(killer.totalKills||0)+1;
+
+  // В доставке корма киллы не влияют на счёт и стрики
+  if(room.type==='delivery'){
+    victim.killStreak=0;
+    return;
+  }
+
   const wasStreak=victim.killStreak||0;
 
   killer.killStreak=(killer.killStreak||0)+1;
@@ -585,14 +594,14 @@ function updateCart(room,now,dt){
       broadcast(room,{a:'deliver',d:{team:1,rounds:cart.rounds.slice(0)}});
       checkMatchEnd(room);
     }
-    cart.x=CART_START.x;
-    cart.progress=0;
+    cart.x=CART_CX;
+    cart.progress=0.5;
     cart.team=null;
   } else if(cart.x>=CART_END.x){
     cart.rounds[0]++;
     broadcast(room,{a:'deliver',d:{team:0,rounds:cart.rounds.slice(0)}});
-    cart.x=CART_START.x;
-    cart.progress=0;
+    cart.x=CART_CX;
+    cart.progress=0.5;
     cart.team=null;
     checkMatchEnd(room);
   } else {
@@ -834,6 +843,8 @@ function playerPack(room,now,viewerId){
     pickups,
     roomData: {
       type: room.type || 'basic',
+      colors: colors,
+      teams: teams,
       hill: room.hill ? {
         x: room.hill.x,
         y: room.hill.y,
@@ -1969,7 +1980,7 @@ function ensureRoom(
       teamSeq:0,
       hill:{...KING_OF_HILL,owner:null,contested:false,lastScoredAt:Date.now()},
       cart:type==='delivery'
-        ?{x:CART_START.x, y:CART_START.y, progress:0, rounds:[0,0], team:null}
+        ?{x:CART_CX, y:CART_START.y, progress:0.5, rounds:[0,0], team:null}
         :null,
     };
 
@@ -2363,6 +2374,13 @@ wss.on(
                 d.color<COLOR_COUNT
               ){
                 p.color=d.color;
+              }
+
+              if(
+                !room.started &&
+                (d.team===0||d.team===1)
+              ){
+                p.team=d.team;
               }
 
               if(d.ready)p.ready=true;

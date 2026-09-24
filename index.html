@@ -161,6 +161,13 @@
   #readyBtn:active{background:#198a52;}
   #readyBtn:disabled{opacity:.5;box-shadow:none;cursor:default;}
   #pregameStatus{font-size:11px;color:#8b949e;min-height:14px;margin-top:8px;}
+  #teamPick{margin-bottom:10px;}
+  #teamPick .pgSub{font-size:11px;color:#8b949e;margin-bottom:6px;}
+  .teamBtns{display:flex;gap:8px;justify-content:center;}
+  .teamBtn{padding:8px 14px;border-radius:8px;border:2px solid #30363d;background:#161b22;color:#8b949e;
+           font:bold clamp(11px,2vmin,13px) monospace;cursor:pointer;pointer-events:auto;}
+  .teamBtn.sel0{border-color:#ffcc66;box-shadow:0 0 10px #ffcc6688;color:#ffe066;}
+  .teamBtn.sel1{border-color:#66ccff;box-shadow:0 0 10px #66ccff88;color:#66ccff;}
 
   /* ====== KILL-STREAK BANNER ====== */
   #streakBanner{position:fixed;top:26%;left:50%;transform:translateX(-50%);
@@ -310,6 +317,13 @@
   <div class="pgTitle">🐾 ЛОББИ · выбери цвет кота</div>
   <div class="pgRoom" id="pregameRoom"></div>
   <div id="colorSwatches" class="colorSwatches"></div>
+  <div id="teamPick" style="display:none">
+    <div class="pgSub">Команда (куда везти корм)</div>
+    <div class="teamBtns">
+      <button id="teamBtn0" class="teamBtn">🍗 КОМАНДА A</button>
+      <button id="teamBtn1" class="teamBtn">🛡 КОМАНДА B</button>
+    </div>
+  </div>
   <button id="readyBtn">В БОЙ</button>
   <div id="pregameStatus"></div>
 </div>
@@ -1169,6 +1183,7 @@ const PLAYER_COLORS = [
 /* ДОСТАВКА КОРМА */
 const CART_START = { x: 220, y: CFG.H / 2 }
 const CART_END = { x: CFG.W - 220, y: CFG.H / 2 }
+const CART_CX = Math.round((CART_START.x + CART_END.x) / 2)
 const CART_R = 44
 
 /* КИЛ-СТРИКИ */
@@ -1326,7 +1341,7 @@ class GameScene extends Phaser.Scene {
         .setDepth(-12)
       this.cartZoneB = this.add.circle(CART_END.x, CART_END.y, CART_R, 0xf85149, 0.22)
         .setDepth(-12)
-      this.cartSprite = this.add.text(CART_START.x, CART_START.y, '🍲', {
+      this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
         fontFamily: 'monospace', fontSize: '46px',
       }).setOrigin(0.5).setDepth(8)
     }
@@ -1478,14 +1493,44 @@ class GameScene extends Phaser.Scene {
         this.myColor = i
         localStorage.setItem('p2p_color', String(i))
         this.colorSwatchesEl.querySelectorAll('.sw').forEach(x => x.classList.toggle('selected', Number(x.dataset.i) === i))
+        if (this.myPeerId){
+          this.peerColors[this.myPeerId] = i
+          this._applyViewColor(this.myPeerId)
+        }
+        this.sendServer('ready', { color:this.myColor, team:this.myTeam, ready:!!this.myReady })
       })
       this.colorSwatchesEl.appendChild(b)
     })
     this.myReady = false
+    this.myTeam = null
+    this.teamPickEl = document.getElementById('teamPick')
+    this.teamBtn0El = document.getElementById('teamBtn0')
+    this.teamBtn1El = document.getElementById('teamBtn1')
+    this.teamBtn0El.addEventListener('pointerdown', (e) => {
+      e.stopPropagation()
+      this.setTeam(0)
+    })
+    this.teamBtn1El.addEventListener('pointerdown', (e) => {
+      e.stopPropagation()
+      this.setTeam(1)
+    })
     this.readyBtn.addEventListener('pointerdown', (e) => {
       e.stopPropagation()
       this.setReady(true)
     })
+  }
+
+  setTeam(t){
+    this.myTeam = t
+    this._syncTeamBtns()
+    if (this.myPeerId) this.peerTeams[this.myPeerId] = t
+    this.sendServer('ready', { color:this.myColor, team:t, ready:!!this.myReady })
+  }
+
+  _syncTeamBtns(){
+    if (!this.teamBtn0El || !this.teamBtn1El) return
+    this.teamBtn0El.classList.toggle('sel0', this.myTeam === 0)
+    this.teamBtn1El.classList.toggle('sel1', this.myTeam === 1)
   }
 
   _initLastUpdate(){
@@ -1535,10 +1580,14 @@ class GameScene extends Phaser.Scene {
       this.readyBtn.disabled = this.myReady
       this.readyBtn.textContent = this.myReady ? '✓ ГОТОВ' : 'В БОЙ'
     }
+    if (this.teamPickEl){
+      this.teamPickEl.style.display = (this.roomType === 'delivery') ? '' : 'none'
+      this._syncTeamBtns()
+    }
     if (this.pregameStatusEl){
       this.pregameStatusEl.textContent = this.myReady
         ? 'Ожидаем остальных…'
-        : 'Выбери цвет и жми «В БОЙ»'
+        : (this.roomType === 'delivery' ? 'Выбери цвет и команду, затем жми «В БОЙ»' : 'Выбери цвет и жми «В БОЙ»')
     }
   }
 
@@ -1550,7 +1599,7 @@ class GameScene extends Phaser.Scene {
     this.myReady = v
     this.readyBtn.disabled = v
     this.readyBtn.textContent = v ? '✓ ГОТОВ' : 'В БОЙ'
-    this.sendServer('ready', { color:this.myColor, ready:!!v })
+    this.sendServer('ready', { color:this.myColor, team:this.myTeam, ready:!!v })
   }
 
   updatePregameStatus(readyCount, total){
@@ -1756,6 +1805,8 @@ class GameScene extends Phaser.Scene {
     if (this.deliveryBarEl) this.deliveryBarEl.style.display = 'none'
     if (this.streakBannerEl) this.streakBannerEl.classList.remove('show')
     this.myReady = false
+    this.myTeam = null
+    if (this.teamPickEl) this.teamPickEl.style.display = 'none'
     if (this.statusEl) this.statusEl.textContent = ''
     if (this.bonusesEl) this.bonusesEl.textContent = ''
     if (this.scoresEl) this.scoresEl.textContent = ''
@@ -1972,7 +2023,7 @@ class GameScene extends Phaser.Scene {
         this.matchData = { ...this.matchData, scoreLimit:this.scoreLimit, started: !!(msg.lobby && msg.lobby.started) }
         this.registry.set('roomType', this.roomType)
         if (this.matchData.started) this.hidePregame()
-        if (this.myPeerId) this.sendServer('ready', { color:this.myColor, ready:false })
+        if (this.myPeerId) this.sendServer('ready', { color:this.myColor, team:this.myTeam, ready:false })
         for (const peerId of (msg.peers || [])){
           if (peerId === this.myPeerId) continue
           this.peers.add(peerId)
@@ -2398,7 +2449,7 @@ class GameScene extends Phaser.Scene {
         this.cartZoneB = this.add.circle(CART_END.x, CART_END.y, CART_R, 0xf85149, 0.22).setDepth(-12)
       }
       if (!this.cartSprite){
-        this.cartSprite = this.add.text(CART_START.x, CART_START.y, '🍲', {
+this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
           fontFamily: 'monospace', fontSize: '46px',
         }).setOrigin(0.5).setDepth(8)
       }
@@ -2592,11 +2643,17 @@ class GameScene extends Phaser.Scene {
         }
       }
       if (data.roomData.hill) this.hillData = { ...this.hillData, ...data.roomData.hill }
-      if (data.roomData.colors){
-        this.peerColors = { ...data.roomData.colors }
+      if (data.roomData.colors || data.colors){
+        this.peerColors = { ...((data.roomData && data.roomData.colors) || data.colors) }
         for (const cid in this.peerColors) this._applyViewColor(cid)
       }
-      if (data.roomData.teams) this.peerTeams = { ...data.roomData.teams }
+      if (data.roomData.teams || data.teams){
+        this.peerTeams = { ...((data.roomData && data.roomData.teams) || data.teams) }
+        if (this.myTeam === null && this.myPeerId && this.peerTeams[this.myPeerId] !== undefined){
+          this.myTeam = (this.peerTeams[this.myPeerId] === 1) ? 1 : 0
+          this._syncTeamBtns()
+        }
+      }
       if (data.roomData.cart){
         this.cartData = data.roomData.cart
         this._updateCartVisual(data.roomData.cart)
