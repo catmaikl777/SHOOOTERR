@@ -234,6 +234,7 @@
         font-family:monospace;gap:16px;z-index:20;padding:24px;text-align:center;}
   #menu h1{margin:0;font-size:clamp(22px,4vmin,32px);letter-spacing:2px;
            color:#fff;text-shadow:0 0 10px #ff2266, 0 0 20px #1133ff;}
+  #lastUpdate{font-size:11px;color:#8b949e;margin-top:-10px;letter-spacing:.5px;}
   #menu input{padding:12px 16px;font-size:clamp(14px,2.2vmin,18px);border-radius:8px;
               border:1px solid #30363d;background:#161b22;color:#e6edf3;
               width:220px;text-align:center;font-family:monospace;}
@@ -336,6 +337,7 @@
 
 <div id="menu">
   <h1>Shoot'n'cats</h1>
+  <div id="lastUpdate"></div>
   <input id="nameInput" placeholder="твоё имя" value="" maxlength="14" />
 
   <div id="lobbyPanel">
@@ -452,6 +454,8 @@ const AC_CFG = {
 const APP_ID = 'p2p-shooter-identity-v1'
 const VOTE_DURATION_MS = 20000
 const RELAY_URL = 'wss://shoooterr.relaxdev.ru'
+const GAME_LAST_UPDATE = '2026-09-24T18:02:01+07:00'
+const GAME_COMMITS_URL = 'https://api.github.com/repos/catmaikl777/SHOOOTERR/commits?per_page=1'
 
 /* ============================================================
    2. DEBUG
@@ -1425,6 +1429,7 @@ class GameScene extends Phaser.Scene {
     this.deliveryRoundBEl = document.getElementById('deliveryRoundB')
 
     this._initPregameUI()
+    this._initLastUpdate()
 
     this.actionBtns = document.getElementById('actionBtns')
     this.dashBtn = document.getElementById('dashBtn')
@@ -1481,6 +1486,44 @@ class GameScene extends Phaser.Scene {
       e.stopPropagation()
       this.setReady(true)
     })
+  }
+
+  _initLastUpdate(){
+    this.lastUpdateEl = document.getElementById('lastUpdate')
+    if (!this.lastUpdateEl) return
+    const cached = parseInt(localStorage.getItem('p2p_last_update') || '', 10)
+    const ts = (Number.isFinite(cached) && cached > 0)
+      ? cached
+      : Date.parse(GAME_LAST_UPDATE)
+    const render = (t) => {
+      this.lastUpdateEl.textContent = 'Последнее обновление: ' + this._timeAgo(t)
+    }
+    render(ts)
+    this.time.delayedCall(60000, () => {
+      if (this.lastUpdateEl) render(ts)
+    })
+    fetch(GAME_COMMITS_URL)
+      .then(r => r.json())
+      .then(arr => {
+        const d = arr && arr[0] && arr[0].commit && arr[0].commit.committer && arr[0].commit.committer.date
+        const t = d ? Date.parse(d) : 0
+        if (!t) return
+        localStorage.setItem('p2p_last_update', String(t))
+        if (this.lastUpdateEl) render(t)
+      })
+      .catch(() => {})
+  }
+
+  _timeAgo(ts){
+    let m = (Date.now() - ts) / 60000
+    if (!Number.isFinite(m) || m < 1) return 'только что'
+    if (m < 60) return Math.round(m) + ' мин назад'
+    m /= 60
+    if (m < 24) return Math.round(m) + ' ч назад'
+    m /= 24
+    if (m < 2) return 'вчера'
+    if (m < 60) return Math.round(m) + ' дн назад'
+    return Math.round(m / 30) + ' мес назад'
   }
 
   showPregame(){
