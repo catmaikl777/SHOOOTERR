@@ -144,6 +144,50 @@
     to{opacity:1;transform:translateX(0) scale(1);}
   }
 
+  /* ====== PRE-GAME ЛОББИ (выбор цвета) ====== */
+  #pregame{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:9;
+            background:rgba(5,7,13,.9);border:1px solid #30363d;border-radius:12px;
+            padding:12px 16px;text-align:center;font-family:monospace;color:#e6edf3;
+            min-width:min(320px,90vw);pointer-events:auto;}
+  #pregame .pgTitle{font-size:clamp(12px,2vmin,15px);margin-bottom:9px;color:#ffe066;letter-spacing:1px;}
+  #pregame .pgRoom{font-size:11px;color:#8b949e;margin-bottom:8px;}
+  .colorSwatches{display:flex;gap:7px;justify-content:center;flex-wrap:wrap;margin-bottom:10px;}
+  .sw{width:clamp(28px,6vmin,34px);height:clamp(28px,6vmin,34px);border-radius:50%;
+      border:3px solid #30363d;cursor:pointer;padding:0;pointer-events:auto;}
+  .sw.selected{border-color:#ffffff;box-shadow:0 0 10px #ffffffcc;transform:scale(1.12);}
+  #readyBtn{pointer-events:auto;padding:10px 34px;border:0;border-radius:8px;
+            background:#22aa66;color:#fff;font:bold clamp(14px,2.2vmin,17px) monospace;cursor:pointer;
+            box-shadow:0 0 14px #22aa66;}
+  #readyBtn:active{background:#198a52;}
+  #readyBtn:disabled{opacity:.5;box-shadow:none;cursor:default;}
+  #pregameStatus{font-size:11px;color:#8b949e;min-height:14px;margin-top:8px;}
+
+  /* ====== KILL-STREAK BANNER ====== */
+  #streakBanner{position:fixed;top:26%;left:50%;transform:translateX(-50%);
+                font:bold clamp(22px,6vmin,46px) monospace;text-align:center;z-index:12;
+                pointer-events:none;color:#ffd066;
+                text-shadow:0 0 20px #ff2266,0 0 44px #ff2266,0 0 80px #ff2266;
+                opacity:0;white-space:nowrap;line-height:1.2;}
+  #streakBanner .sbSub{font:normal clamp(12px,2.6vmin,20px) monospace;color:#fff;
+                       text-shadow:0 0 12px #1133ff;}
+  #streakBanner.show{animation:sb .34s cubic-bezier(.2,.9,.3,1.4) forwards;}
+  @keyframes sb{
+    0%{opacity:0;transform:translateX(-50%) scale(.35);}
+    55%{opacity:1;transform:translateX(-50%) scale(1.18);}
+    100%{opacity:1;transform:translateX(-50%) scale(1);}
+  }
+
+  /* ====== ДОСТАВКА КОРМА (прогресс) ====== */
+  #deliveryBar{position:fixed;top:96px;left:50%;transform:translateX(-50%);z-index:9;
+               display:flex;align-items:center;gap:10px;
+               font:clamp(10px,1.7vmin,15px) monospace;color:#e6edf3;
+               background:rgba(5,7,13,.75);padding:6px 12px;border-radius:8px;pointer-events:none;}
+  .dbar{width:min(300px,40vw);height:11px;background:#0d1117;border:1px solid #30363d;
+        border-radius:6px;overflow:hidden;}
+  #dbarFill{height:100%;width:0%;background:linear-gradient(90deg,#22aa66,#ffe066);
+            transition:width .25s linear;}
+  #deliveryRoundA,#deliveryRoundB{min-width:34px;text-align:center;}
+
   /* ====== VIGNETTE ====== */
   #vignette{position:fixed;inset:0;pointer-events:none;z-index:4;
             background:radial-gradient(ellipse at center,
@@ -224,6 +268,21 @@
   #privateJoinBox{display:none;gap:7px;justify-content:center;align-items:center;flex-wrap:wrap;}
   #privateJoinBox input{width:145px;}
   #privateJoinBox button{background:#22aa66;box-shadow:0 0 12px #22aa66;}
+  #matchEnd{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+            background:rgba(5,7,13,.94);z-index:30;pointer-events:auto;padding:24px;
+            box-sizing:border-box;font-family:monospace;color:#e6edf3;}
+  #matchEndCard{width:min(520px,94vw);max-height:88vh;overflow:auto;padding:24px;
+                 background:#161b22;border:1px solid #30363d;border-radius:12px;
+                 text-align:center;box-shadow:0 0 30px #1133ff55;}
+  #matchEnd h2{margin:0 0 12px;font-size:clamp(22px,4vmin,34px);letter-spacing:2px;
+                color:#fff;text-shadow:0 0 12px #ff2266;}
+  #matchWinner{color:#ffe066;font-size:clamp(14px,2.4vmin,20px);margin-bottom:16px;}
+  #matchTop{display:flex;flex-direction:column;gap:7px;margin-bottom:20px;text-align:left;}
+  .matchRow{display:flex;justify-content:space-between;gap:12px;padding:9px 12px;
+            background:#0d1117;border:1px solid #30363d;border-radius:7px;font-size:14px;}
+  .matchRow.winner{border-color:#ffe066;color:#ffe066;font-weight:bold;}
+  .matchRow.me{color:#3fb950;}
+  #matchMenuBtn{width:100%;padding:13px 20px;font-size:16px;}
   @media (max-height: 700px){
     #lobbyList{max-height:27vh;}
   }
@@ -245,11 +304,34 @@
 <div id="killfeed"></div>
 <div id="vignette"></div>
 <div id="fogOverlay"></div>
+
+<div id="pregame" style="display:none">
+  <div class="pgTitle">🐾 ЛОББИ · выбери цвет кота</div>
+  <div class="pgRoom" id="pregameRoom"></div>
+  <div id="colorSwatches" class="colorSwatches"></div>
+  <button id="readyBtn">В БОЙ</button>
+  <div id="pregameStatus"></div>
+</div>
+<div id="streakBanner"></div>
+<div id="deliveryBar" style="display:none">
+  <span id="deliveryRoundA">🍗 0</span>
+  <div class="dbar"><div id="dbarFill"></div></div>
+  <span id="deliveryRoundB">🛡 0</span>
+</div>
 <button id="voteBtn" style="display:none">VOTE HOST</button>
 <button id="soundBtn" style="display:none">🔊</button>
 <div id="actionBtns" style="display:none">
   <button id="weaponBtn">🔫</button>
   <button id="dashBtn">⚡</button>
+</div>
+
+<div id="matchEnd">
+  <div id="matchEndCard">
+    <h2>БОЙ ОКОНЧЕН</h2>
+    <div id="matchWinner"></div>
+    <div id="matchTop"></div>
+    <button id="matchMenuBtn">В меню</button>
+  </div>
 </div>
 
 <div id="menu">
@@ -273,10 +355,10 @@
       <input id="newLobbyPassword" placeholder="пароль (для закрытого)" maxlength="32" style="display:none" />
       <select id="newRoomType">
         <option value="basic">🗺 Базовая</option>
-        <option value="portals">🌀 Порталы</option>
-        <option value="moving_walls">🔄 Движ. стены</option>
         <option value="king_of_hill">👑 Царь горы</option>
+        <option value="delivery">🍲 Доставка корма</option>
       </select>
+      <input id="newLobbyScoreLimit" type="number" min="1" max="100000" value="100" title="очки для победы" />
       <button id="createLobbyBtn">СОЗДАТЬ</button>
     </div>
 
@@ -648,6 +730,20 @@ class SoundEngine {
     this._tone({freq: 300, freqEnd: 600, type:'sine', dur:0.3, vol:V, pan, send:0.3})
     this._tone({freq: 450, freqEnd: 900, type:'sine', dur:0.3, vol:V*0.7, pan, send:0.3})
     this._tone({freq: 600, freqEnd: 1200, type:'triangle', dur:0.35, vol:V*0.5, pan, send:0.3})
+  }
+  streak(pan = 0, volMul = 1){
+    const V = 0.34 * volMul
+    this._tone({freq: 523, type:'square', dur:0.12, vol:V, pan, send:0.3})
+    this._tone({freq: 659, type:'square', dur:0.12, vol:V, pan, send:0.3})
+    this._tone({freq: 784, type:'square', dur:0.16, vol:V, pan, send:0.3})
+    this._tone({freq: 1046, type:'square', dur:0.3, vol:V*0.8, pan, send:0.3})
+  }
+  deliver(pan = 0, volMul = 1){
+    const V = 0.32 * volMul
+    this._tone({freq: 440, type:'triangle', dur:0.14, vol:V, pan, send:0.3})
+    this._tone({freq: 554, type:'triangle', dur:0.14, vol:V*0.9, pan, send:0.3})
+    this._tone({freq: 659, type:'triangle', dur:0.2, vol:V*0.8, pan, send:0.3})
+    this._tone({freq: 880, type:'sine', dur:0.35, vol:V*0.7, pan, send:0.4})
   }
   pickup(type = 'hp', pan = 0, volMul = 1){
     const V = 0.26 * volMul
@@ -1058,6 +1154,24 @@ const SPAWNS = [
   {x:CFG.W/2,y:120},{x:CFG.W/2,y:CFG.H-120},
 ]
 const KING_OF_HILL = { x: CFG.W / 2, y: CFG.H / 2, r: 150 }
+
+/* Палитра цветов кота-игрока (индексы согласованы с сервером) */
+const PLAYER_COLORS = [
+  0x3fb950, 0x58a6ff, 0xff6b6b, 0xf2cc60,
+  0xd2a8ff, 0xff9e64, 0x79c0ff, 0xf778ba,
+  0x7ee787, 0xffa657, 0x9e76ff, 0xe3b341,
+]
+
+/* ДОСТАВКА КОРМА */
+const CART_START = { x: 220, y: CFG.H / 2 }
+const CART_END = { x: CFG.W - 220, y: CFG.H / 2 }
+const CART_R = 44
+
+/* КИЛ-СТРИКИ */
+const STREAK_NAMES = { 3:'УБИЙЦА', 5:'ПОГОНЩИК', 7:'КОШАЧИЙ КОШМАР', 10:'ЛЕГЕНДА АРЕНЫ' }
+function winnerTeamLabel(t){
+  return t === 'team0' ? '🍗 Команда A' : t === 'team1' ? '🛡 Команда B' : ''
+}
 function generateKingOfHillWalls(){
   const cs = CFG.CELL
   const cols = Math.floor(CFG.W / cs)
@@ -1115,34 +1229,6 @@ function generateWalls(seedStr, type){
       push(cc, rr)
     }
   }
-  // Дополнительные стены для особых типов комнат
-  if (type === 'moving_walls'){
-    for(let i=0;i<15;i++){
-      const c = 3 + Math.floor(rng()*(cols-6))
-      const r = 3 + Math.floor(rng()*(rows-6))
-      const len = 1 + Math.floor(rng()*4)
-      const horiz = rng() < 0.5
-      for (let j=0;j<len;j++){
-        const cc = horiz ? c+j : c, rr = horiz ? r : r+j
-        if (cc >= cols-1 || rr >= rows-1) break
-        if (nearSpawn(cc*cs+cs/2, rr*cs+cs/2)) continue
-        push(cc, rr)
-      }
-    }
-  } else if (type === 'portals'){
-    for(let i=0;i<10;i++){
-      const c = 3 + Math.floor(rng()*(cols-6))
-      const r = 3 + Math.floor(rng()*(rows-6))
-      const len = 1 + Math.floor(rng()*2)
-      const horiz = rng() < 0.5
-      for (let j=0;j<len;j++){
-        const cc = horiz ? c+j : c, rr = horiz ? r : r+j
-        if (cc >= cols-1 || rr >= rows-1) break
-        if (nearSpawn(cc*cs+cs/2, rr*cs+cs/2)) continue
-        push(cc, rr)
-      }
-    }
-  }
   return out
 }
 
@@ -1189,6 +1275,9 @@ class GameScene extends Phaser.Scene {
     this.myName = this.registry.get('playerName') || 'anon'
     this.sfx = this.registry.get('sfx')
     this.roomType = this.registry.get('roomType') || 'basic'
+    this.scoreLimit = Number(this.registry.get('scoreLimit')) || 100
+    this.matchData = { over:false, winnerId:null, scoreLimit:this.scoreLimit, started:false }
+    this.returningToMenu = false
     this.hillData = { ...KING_OF_HILL, owner:null, contested:false, progress:0 }
     this.hillZone = null
     this.hillLabel = null
@@ -1210,7 +1299,6 @@ class GameScene extends Phaser.Scene {
 
     this.wallRects = generateWalls(this.roomId, this.roomType)
     this.wallSprites = []
-    this.movingWallSprites = []
     if (CFG.WALL_GLOW){
       for (const r of this.wallRects){
         this.add.image(r.x + r.w/2, r.y + r.h/2, 'wall')
@@ -1223,68 +1311,20 @@ class GameScene extends Phaser.Scene {
         .setOrigin(0).setDepth(-10).setDisplaySize(r.w, r.h).setTintFill(CFG.WALL_COLOR))
     }
 
-    // Порталы
-    this.portals = []
-    this.portalData = []
-    this._portalVisuals = []
-    if (this.roomType === 'portals'){
-      const prng = mulberry32(hashStr(this.roomId + '_portals'))
-      this._portalVisuals = []
-      this.portalData = []
-      for(let i=0;i<4;i++){
-        const px = 150 + Math.floor(prng()*(CFG.W-300))
-        const py = 150 + Math.floor(prng()*(CFG.H-300))
-        const pair = i%2===0?'a':'b'
-        this.portals.push({x:px, y:py, pair:pair, active:true})
-        this.portalData.push({x:px, y:py, pair:pair, active:true})
-        const color = pair === 'a' ? 0x00ffff : 0xff00ff
-        const glow = this.add.circle(px + 20, py + 20, 25, color, 0.4)
-          .setDepth(-5).setAlpha(0.5)
-        const sprite = this.add.circle(px + 20, py + 20, 18, color, 0.7)
-          .setDepth(-4).setAlpha(0.8)
-        const text = this.add.text(px + 20, py + 20, pair.toUpperCase(), {
-          fontFamily: 'monospace', fontSize: '14px', color: '#ffffff'
-        }).setOrigin(0.5).setDepth(-3)
-        this._portalVisuals.push({glow, sprite, text, data:{x:px, y:py, pair:pair}})
-      }
-    }
-
-    // Движущиеся стены
-    this.movingWalls = []
-    if (this.roomType === 'moving_walls'){
-      const mrng = mulberry32(hashStr(this.roomId + '_moving'))
-      const movableWalls = this.wallRects.filter(w => !(w.w===CFG.CELL && (w.x===0||w.y===0||w.x+w.w===CFG.W||w.y+w.h===CFG.H)))
-      const count = Math.min(8, movableWalls.length)
-      const usedWalls = new Set()
-      for(let i=0;i<count;i++){
-        let idx = Math.floor(mrng*movableWalls.length)
-        let attempts = 0
-        while(usedWalls.has(idx) && attempts < 20){
-          idx = Math.floor(mrng*movableWalls.length)
-          attempts++
-        }
-        if(usedWalls.has(idx)) continue
-        usedWalls.add(idx)
-        const w = movableWalls[idx]
-        if(!w) continue
-        const kind = mrng() < 0.5 ? 'rotate' : 'translate'
-        this.movingWalls.push({
-          wallIndex: idx,
-          wall: w,
-          kind: kind,
-          angle: 0,
-          angleSpeed: (mrng()-0.5)*0.02,
-          offset: 0,
-          offsetSpeed: (mrng()-0.5)*2,
-          offsetRange: 20 + mrng()*30,
-        })
-        const mwSprite = this.add.image(w.x, w.y, 'wall')
-          .setOrigin(0).setDepth(-10).setDisplaySize(w.w, w.h).setTintFill(0xffaa33)
-        if(kind === 'rotate'){
-          mwSprite.setOrigin(0.5, 0.5)
-        }
-        this.movingWallSprites.push({sprite:mwSprite, data:this.movingWalls[this.movingWalls.length-1]})
-      }
+    // ДОСТАВКА КОРМА: трек, зоны и тележка
+    this.cartData = null
+    this.cartSprite = null
+    if (this.roomType === 'delivery'){
+      this.cartTrack = this.add.graphics().setDepth(-15)
+      this.cartTrack.lineStyle(4, 0x30363d, 0.9)
+      this.cartTrack.lineBetween(CART_START.x, CART_START.y, CART_END.x, CART_END.y)
+      this.cartZoneA = this.add.circle(CART_START.x, CART_START.y, CART_R, 0x3fb950, 0.22)
+        .setDepth(-12)
+      this.cartZoneB = this.add.circle(CART_END.x, CART_END.y, CART_R, 0xf85149, 0.22)
+        .setDepth(-12)
+      this.cartSprite = this.add.text(CART_START.x, CART_START.y, '🍲', {
+        fontFamily: 'monospace', fontSize: '46px',
+      }).setOrigin(0.5).setDepth(8)
     }
 
     this.cameras.main.setBounds(0, 0, CFG.W, CFG.H)
@@ -1309,6 +1349,8 @@ class GameScene extends Phaser.Scene {
     this._visibleCache = {}
     this.scores = {}
     this.peerNames = {}
+    this.peerColors = {}
+    this.peerTeams = {}
     this._lastLocalShot = 0
     this._lastNameSent = 0
 
@@ -1364,6 +1406,25 @@ class GameScene extends Phaser.Scene {
 
     this.killfeedEl = document.getElementById('killfeed')
     this.vignetteEl = document.getElementById('vignette')
+    this.matchEndEl = document.getElementById('matchEnd')
+    this.matchWinnerEl = document.getElementById('matchWinner')
+    this.matchTopEl = document.getElementById('matchTop')
+    this.matchMenuBtn = document.getElementById('matchMenuBtn')
+    this.matchEndEl.style.display = 'none'
+    this.matchMenuBtn.addEventListener('click', () => this.returnToMenu())
+
+    this.pregameEl = document.getElementById('pregame')
+    this.pregameRoomEl = document.getElementById('pregameRoom')
+    this.pregameStatusEl = document.getElementById('pregameStatus')
+    this.colorSwatchesEl = document.getElementById('colorSwatches')
+    this.readyBtn = document.getElementById('readyBtn')
+    this.streakBannerEl = document.getElementById('streakBanner')
+    this.deliveryBarEl = document.getElementById('deliveryBar')
+    this.dbarFillEl = document.getElementById('dbarFill')
+    this.deliveryRoundAEl = document.getElementById('deliveryRoundA')
+    this.deliveryRoundBEl = document.getElementById('deliveryRoundB')
+
+    this._initPregameUI()
 
     this.actionBtns = document.getElementById('actionBtns')
     this.dashBtn = document.getElementById('dashBtn')
@@ -1395,6 +1456,79 @@ class GameScene extends Phaser.Scene {
         this.sfx.pickupSpawn(sp.pan, sp.vol)
       }
     })
+  }
+
+  /* =========== PRE-GAME ЛОББИ =========== */
+  _initPregameUI(){
+    const saved = parseInt(localStorage.getItem('p2p_color') ?? '', 10)
+    this.myColor = (Number.isInteger(saved) && saved >= 0 && saved < PLAYER_COLORS.length) ? saved : 0
+    this.colorSwatchesEl.innerHTML = ''
+    PLAYER_COLORS.forEach((c, i) => {
+      const b = document.createElement('button')
+      b.className = 'sw' + (i === this.myColor ? ' selected' : '')
+      b.style.background = '#' + c.toString(16).padStart(6, '0')
+      b.dataset.i = i
+      b.addEventListener('pointerdown', (e) => {
+        e.stopPropagation()
+        this.myColor = i
+        localStorage.setItem('p2p_color', String(i))
+        this.colorSwatchesEl.querySelectorAll('.sw').forEach(x => x.classList.toggle('selected', Number(x.dataset.i) === i))
+      })
+      this.colorSwatchesEl.appendChild(b)
+    })
+    this.myReady = false
+    this.readyBtn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation()
+      this.setReady(true)
+    })
+  }
+
+  showPregame(){
+    if (!this.pregameEl) return
+    const wasHidden = this.pregameEl.style.display === 'none'
+    if (wasHidden){
+      this.pregameEl.style.display = ''
+      if (this.pregameRoomEl) this.pregameRoomEl.textContent = 'Комната: ' + (this.roomName || this.roomId || '')
+      this.readyBtn.disabled = this.myReady
+      this.readyBtn.textContent = this.myReady ? '✓ ГОТОВ' : 'В БОЙ'
+    }
+    if (this.pregameStatusEl){
+      this.pregameStatusEl.textContent = this.myReady
+        ? 'Ожидаем остальных…'
+        : 'Выбери цвет и жми «В БОЙ»'
+    }
+  }
+
+  hidePregame(){
+    if (this.pregameEl) this.pregameEl.style.display = 'none'
+  }
+
+  setReady(v){
+    this.myReady = v
+    this.readyBtn.disabled = v
+    this.readyBtn.textContent = v ? '✓ ГОТОВ' : 'В БОЙ'
+    this.sendServer({ a:'ready', d:{ color:this.myColor, ready:!!v } })
+  }
+
+  updatePregameStatus(readyCount, total){
+    if (!this.pregameStatusEl || !this.pregameEl || this.pregameEl.style.display === 'none') return
+    this.pregameStatusEl.textContent =
+      this.myReady
+        ? (readyCount + ' / ' + total + ' готовы · ожидаем остальных…')
+        : 'Нажми «В БОЙ», когда готов'
+  }
+
+  getPlayerColor(pid){
+    const ci = this.peerColors[pid]
+    if (Number.isInteger(ci) && PLAYER_COLORS[ci]) return PLAYER_COLORS[ci]
+    return null
+  }
+
+  _applyViewColor(id){
+    const v = this.views[id]
+    if (!v || !v.sprite || !v.sprite.active) return
+    const c = this.getPlayerColor(id)
+    if (c) v.sprite.setTint(c)
   }
 
   /* =========== DASH =========== */
@@ -1505,6 +1639,88 @@ class GameScene extends Phaser.Scene {
       el.style.transform = 'translateX(-24px)'
       setTimeout(() => el.remove(), 450)
     }, 5000)
+  }
+
+  addKillfeedEntry(rawText){
+    if (!this.killfeedEl) return
+    const el = document.createElement('div')
+    el.className = 'kf mine'
+    el.innerHTML = '<span class="who">' + escapeHtml(rawText) + '</span>'
+    this.killfeedEl.appendChild(el)
+    while (this.killfeedEl.children.length > 5){
+      this.killfeedEl.removeChild(this.killfeedEl.firstChild)
+    }
+    setTimeout(() => {
+      if (!el.parentNode) return
+      el.style.transition = 'opacity .4s, transform .4s'
+      el.style.opacity = '0'
+      el.style.transform = 'translateX(-24px)'
+      setTimeout(() => el.remove(), 450)
+    }, 5000)
+  }
+
+  showMatchEnd(){
+    if (!this.matchEndEl) return
+    this.matchEndEl.style.display = 'flex'
+    this.renderMatchEnd()
+  }
+
+  renderMatchEnd(){
+    if (!this.matchTopEl) return
+
+    const wId = this.matchData.winnerId
+    if (this.roomType === 'delivery' && (wId === 'team0' || wId === 'team1')){
+      const roundsA = (this.cartData && this.cartData.rounds && this.cartData.rounds[0]) || 0
+      const roundsB = (this.cartData && this.cartData.rounds && this.cartData.rounds[1]) || 0
+      let teamLabel = winnerTeamLabel(wId)
+      this.matchWinnerEl.textContent = teamLabel + ' — доставка корма одержана!'
+      this.matchTopEl.innerHTML =
+        `<div class="matchRow winner"><span>🍗 Команда A (доставка)</span><strong>${roundsA}</strong></div>` +
+        `<div class="matchRow"><span>🛡 Команда B (защита)</span><strong>${roundsB}</strong></div>`
+      return
+    }
+
+    const rows = Object.keys(this.scores || {}).map(id => ({
+      id,
+      name: this.peerNames[id] || id.slice(0, 6),
+      score: Number(this.scores[id]) || 0,
+      isMe: id === this.myPeerId,
+    }))
+    rows.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    const winnerId = this.matchData.winnerId || (rows[0] && rows[0].id)
+    const winner = rows.find(row => row.id === winnerId)
+    this.matchWinnerEl.textContent = winner ? 'Победитель: ' + winner.name : 'Бой завершён'
+    this.matchTopEl.innerHTML = rows.map((row, i) => {
+      const cls = row.id === winnerId ? 'matchRow winner' : (row.isMe ? 'matchRow me' : 'matchRow')
+      return `<div class="${cls}"><span>${i + 1}. ${escapeHtml(row.name)}</span><strong>${row.score}</strong></div>`
+    }).join('')
+  }
+
+  returnToMenu(){
+    this.returningToMenu = true
+    try { this.ws?.close() } catch {}
+    const menu = document.getElementById('menu')
+    const gameWrap = document.getElementById('gameWrap')
+    const ui = document.getElementById('ui')
+    if (menu) menu.style.display = 'flex'
+    if (gameWrap) gameWrap.style.display = 'none'
+    if (ui) ui.style.display = 'none'
+    if (this.actionBtns) this.actionBtns.style.display = 'none'
+    if (this.voteBtn) this.voteBtn.style.display = 'none'
+    if (this.soundBtn) this.soundBtn.style.display = 'none'
+    if (this.matchEndEl) this.matchEndEl.style.display = 'none'
+    if (this.pregameEl) this.pregameEl.style.display = 'none'
+    if (this.deliveryBarEl) this.deliveryBarEl.style.display = 'none'
+    if (this.streakBannerEl) this.streakBannerEl.classList.remove('show')
+    this.myReady = false
+    if (this.statusEl) this.statusEl.textContent = ''
+    if (this.bonusesEl) this.bonusesEl.textContent = ''
+    if (this.scoresEl) this.scoresEl.textContent = ''
+    if (this.killfeedEl) this.killfeedEl.innerHTML = ''
+    if (this.voteInfo) this.voteInfo.textContent = ''
+    const refresh = document.getElementById('refreshLobbies')
+    if (refresh) refresh.click()
+    try { this.game.destroy(true) } catch {}
   }
 
   flashVignette(){
@@ -1675,6 +1891,9 @@ class GameScene extends Phaser.Scene {
       png:  (d, id) => this.onNetPing(d, id),
       id:   (d, id) => this.onNetIdentity(d, id),
       vote: (d, id) => this.onNetVote(d, id),
+      ks:   (d, id) => this.onNetStreak(d, id),
+      deliver: (d, id) => this.onNetDeliver(d, id),
+      start: (d, id) => this.onNetStart(d, id),
     }
     this.connectToRelay()
   }
@@ -1706,7 +1925,11 @@ class GameScene extends Phaser.Scene {
         this.isHost = false
         this.hasBecomeClient = true
         this.roomType = msg.roomType || this.roomType || 'basic'
+        this.scoreLimit = Number(msg.lobby && msg.lobby.scoreLimit) || this.scoreLimit
+        this.matchData = { ...this.matchData, scoreLimit:this.scoreLimit, started: !!(msg.lobby && msg.lobby.started) }
         this.registry.set('roomType', this.roomType)
+        if (this.matchData.started) this.hidePregame()
+        if (this.myPeerId) this.sendServer({ a:'ready', d:{ color:this.myColor, ready:false } })
         for (const peerId of (msg.peers || [])){
           if (peerId === this.myPeerId) continue
           this.peers.add(peerId)
@@ -1754,6 +1977,7 @@ class GameScene extends Phaser.Scene {
 
     this.ws.onerror = err => DBG.err('NET', 'ws err', err)
     this.ws.onclose = ev => {
+      if (this.returningToMenu) return
       if (this.reconnectAttempts < 30){
         this.reconnectAttempts++
         const delay = Math.min(2000 * this.reconnectAttempts, 10000)
@@ -1925,6 +2149,48 @@ class GameScene extends Phaser.Scene {
       acLog(`✓ ${fromId.slice(0,6)} id:${(data.pubHash||'?').slice(0,6)}${p.verified?' v':''}`)
     }
   }
+  onNetStreak(data){
+    if (!data) return
+    if (data.ended){
+      this.showStreakBanner('⚠ ' + (data.name || '…') + ' · серия ' + data.streak + ' прервана!', '#f85149')
+    } else {
+      const label = STREAK_NAMES[data.streak] || data.label || ''
+      const bonus = data.bonus ? ' +' + data.bonus + '⚡' : ''
+      const isMe = data.pid === this.myPeerId
+      if (isMe){
+        this.sfx.streak(0, 1)
+        this.showStreakBanner((data.streak) + ' УБИЙСТВ\n' + label + bonus, '#ffd066')
+        this.cameras.main.flash(160, 255, 120, 60)
+      } else {
+        this.addKillfeedEntry((data.name || '…') + ' · серия ' + data.streak + ' · ' + (label || ''))
+      }
+    }
+  }
+  onNetDeliver(data){
+    this.sfx.deliver(0, 0.9)
+    if (data.rounds) this._updateDeliveryRounds(data.rounds)
+    this.addKillfeedEntry(data.team === 0 ? '🍲 КОРМ ДОСТАВЛЕН! Команда A (+1)' : '🛡 КОРМ ОТБИТ! Команда B (+1)')
+  }
+  onNetStart(data){
+    if (data && data.started) this.hidePregame()
+  }
+  _updateDeliveryRounds(rounds){
+    if (this.roomType === 'delivery' && this.deliveryRoundAEl && rounds){
+      this.deliveryRoundAEl.textContent = '🍗 ' + (rounds[0] || 0)
+      this.deliveryRoundBEl.textContent = '🛡 ' + (rounds[1] || 0)
+    }
+  }
+  showStreakBanner(text, color){
+    if (!this.streakBannerEl) return
+    this.streakBannerEl.innerHTML = text.split('\n').map((ln, i) =>
+      i === 0 ? '<span>' + ln + '</span>' : '<span class="sbSub">' + ln + '</span>'
+    ).join('<br>')
+    this.streakBannerEl.style.color = color || '#ffd066'
+    this.streakBannerEl.classList.remove('show')
+    void this.streakBannerEl.offsetWidth
+    this.streakBannerEl.classList.add('show')
+    this.time.delayedCall(2200, () => this.streakBannerEl.classList.remove('show'))
+  }
   onNetVote(data, fromId){
     if (this.isHost && fromId !== this.myPeerId){
       for (const peerId of this.peers){
@@ -2078,69 +2344,20 @@ class GameScene extends Phaser.Scene {
     this.worldPlayers = {}
     this.pickups = []
     this.lastPickupSpawn = 0
-    this.portals = []
-    this.movingWalls = []
-    this.movingWallSprites = []
-    this.portalData = []
-    this._portalVisuals = []
-    this.movingWallData = []
     const roomType = this.roomType || 'basic'
-    // Генерация порталов
-    if (roomType === 'portals'){
-      const prng = mulberry32(hashStr(this.roomId + '_portals'))
-      this._portalVisuals = []
-      this.portalData = []
-      for(let i=0;i<4;i++){
-        const px = 150 + Math.floor(prng()*(CFG.W-300))
-        const py = 150 + Math.floor(prng()*(CFG.H-300))
-        const pair = i%2===0?'a':'b'
-        this.portals.push({x:px, y:py, pair:pair, active:true})
-        this.portalData.push({x:px, y:py, pair:pair, active:true})
-        const color = pair === 'a' ? 0x00ffff : 0xff00ff
-        const glow = this.add.circle(px + 20, py + 20, 25, color, 0.4)
-          .setDepth(-5).setAlpha(0.5)
-        const sprite = this.add.circle(px + 20, py + 20, 18, color, 0.7)
-          .setDepth(-4).setAlpha(0.8)
-        const text = this.add.text(px + 20, py + 20, pair.toUpperCase(), {
-          fontFamily: 'monospace', fontSize: '14px', color: '#ffffff'
-        }).setOrigin(0.5).setDepth(-3)
-        this._portalVisuals.push({glow, sprite, text, data:{x:px, y:py, pair:pair}})
+    if (roomType === 'delivery'){
+      this.cartData = null
+      if (!this.cartTrack){
+        this.cartTrack = this.add.graphics().setDepth(-15)
+        this.cartTrack.lineStyle(4, 0x30363d, 0.9)
+        this.cartTrack.lineBetween(CART_START.x, CART_START.y, CART_END.x, CART_END.y)
+        this.cartZoneA = this.add.circle(CART_START.x, CART_START.y, CART_R, 0x3fb950, 0.22).setDepth(-12)
+        this.cartZoneB = this.add.circle(CART_END.x, CART_END.y, CART_R, 0xf85149, 0.22).setDepth(-12)
       }
-    }
-    // Генерация движущихся стен
-    if (roomType === 'moving_walls'){
-      const mrng = mulberry32(hashStr(this.roomId + '_moving'))
-      const movableWalls = this.wallRects.filter(w => !(w.w===CFG.CELL && (w.x===0||w.y===0||w.x+w.w===CFG.W||w.y+w.h===CFG.H)))
-      const count = Math.min(8, movableWalls.length)
-      const usedWalls = new Set()
-      for(let i=0;i<count;i++){
-        let idx = Math.floor(mrng*movableWalls.length)
-        let attempts = 0
-        while(usedWalls.has(idx) && attempts < 20){
-          idx = Math.floor(mrng*movableWalls.length)
-          attempts++
-        }
-        if(usedWalls.has(idx)) continue
-        usedWalls.add(idx)
-        const w = movableWalls[idx]
-        if(!w) continue
-        const kind = mrng() < 0.5 ? 'rotate' : 'translate'
-        this.movingWalls.push({
-          wallIndex: idx,
-          wall: w,
-          kind: kind,
-          angle: 0,
-          angleSpeed: (mrng()-0.5)*0.02,
-          offset: 0,
-          offsetSpeed: (mrng()-0.5)*2,
-          offsetRange: 20 + mrng()*30,
-        })
-        const mwSprite = this.add.image(w.x, w.y, 'wall')
-          .setOrigin(0).setDepth(-10).setDisplaySize(w.w, w.h).setTintFill(0xffaa33)
-        if(kind === 'rotate'){
-          mwSprite.setOrigin(0.5, 0.5)
-        }
-        this.movingWallSprites.push({sprite:mwSprite, data:this.movingWalls[this.movingWalls.length-1]})
+      if (!this.cartSprite){
+        this.cartSprite = this.add.text(CART_START.x, CART_START.y, '🍲', {
+          fontFamily: 'monospace', fontSize: '46px',
+        }).setOrigin(0.5).setDepth(8)
       }
     }
     const ids = [this.myPeerId, ...this.peers].filter(id => id && !this.ac.bans.has(id))
@@ -2243,13 +2460,14 @@ class GameScene extends Phaser.Scene {
       if (v > 0 && v < 5000 && v > ping) ping = v
     }
     ping = Math.round(ping)
-    const typeEmoji = {basic:'🗺', portals:'🌀', moving_walls:'🔄', king_of_hill:'👑'}
+    const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
     const typeIcon = typeEmoji[this.roomType] || '🗺'
     let hillStatus = ''
     if (this.roomType === 'king_of_hill'){
       hillStatus = this.hillData.contested ? ' · зона: спор' : (this.hillData.owner === this.myPeerId ? ' · 👑 вы на горе' : '')
     }
-    this.statusEl.textContent = `${role} · ${myName} · ${this.roomId} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc}${hillStatus} · ping: ${ping}ms`
+    const matchStatus = this.matchData.over ? ' · бой окончен' : ''
+    this.statusEl.textContent = `${role} · ${myName} · ${this.roomId} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc}/${this.scoreLimit}${hillStatus}${matchStatus} · ping: ${ping}ms`
   }
 
   renderBonuses(){
@@ -2316,16 +2534,29 @@ class GameScene extends Phaser.Scene {
 
     if (data.roomData){
       this.roomType = data.roomData.type || this.roomType
-      if (data.roomData.hill) this.hillData = { ...this.hillData, ...data.roomData.hill }
-      if (data.roomData.portals){
-        this.portalData = data.roomData.portals
-        if (!this.portals) this.portals = []
-        this.portals = this.portalData.map(p => ({...p}))
-        this._updatePortalSprites()
+      if (data.roomData.match){
+        this.matchData = { ...this.matchData, ...data.roomData.match }
+        this.scoreLimit = Number(this.matchData.scoreLimit) || this.scoreLimit
+        if (this.matchData.over) this.showMatchEnd()
+        else this.matchEndEl.style.display = 'none'
+        if (this.matchData.started){
+          this.hidePregame()
+        } else {
+          this.showPregame()
+        }
+        if (this.roomType === 'delivery' && this.deliveryBarEl){
+          this.deliveryBarEl.style.display = this.matchData.started ? '' : 'none'
+        }
       }
-      if (data.roomData.movingWalls){
-        this.movingWallData = data.roomData.movingWalls
-        this._updateMovingWallSprites(data.roomData.movingWalls)
+      if (data.roomData.hill) this.hillData = { ...this.hillData, ...data.roomData.hill }
+      if (data.roomData.colors){
+        this.peerColors = { ...data.roomData.colors }
+        for (const cid in this.peerColors) this._applyViewColor(cid)
+      }
+      if (data.roomData.teams) this.peerTeams = { ...data.roomData.teams }
+      if (data.roomData.cart){
+        this.cartData = data.roomData.cart
+        this._updateCartVisual(data.roomData.cart)
       }
     }
 
@@ -2456,7 +2687,7 @@ class GameScene extends Phaser.Scene {
       if (d.dead) v.dead = true
       v.sprite.setTintFill(d.blocked ? 0x88ccff : 0xffffff)
       this.time.delayedCall(60, ()=>{
-        if (v.sprite && v.sprite.active) v.sprite.setTint(colorFromId(d.target))
+        if (v.sprite && v.sprite.active) v.sprite.setTint(this.getPlayerColor(d.target) || colorFromId(d.target))
       })
     }
     if (byMe) this.cameras.main.shake(50, 0.002)
@@ -2544,6 +2775,7 @@ class GameScene extends Phaser.Scene {
     if (this.views[id]) return this.views[id]
     const sprite = this.add.image(0, 0, 'player')
       .setDisplaySize(CFG.PLAYER_W, CFG.PLAYER_H).setDepth(10).setTint(colorFromId(id))
+    this._applyViewColor(id)
     const bar = this.add.graphics().setDepth(11)
     const label = this.add.text(0, 0, this.peerNames[id] || id.slice(0, 6), {
       fontFamily: 'monospace', fontSize: '11px', color: '#e6edf3',
@@ -2662,32 +2894,6 @@ class GameScene extends Phaser.Scene {
     this.local.y = this.predicted.y
     this.local.aimX = this.aimVec.x
     this.local.aimY = this.aimVec.y
-
-    // Порталы: проверяем телепортацию локального игрока
-    if (this.roomType === 'portals' && this.portals){
-      for (const portal of this.portals){
-        const dx = this.local.x - portal.x - CFG.CELL/2
-        const dy = this.local.y - portal.y - CFG.CELL/2
-        if (dx*dx + dy*dy < 30*30){
-          // Телепортируем к парному порталу
-          const pair = portal.pair === 'a' ? 'b' : 'a'
-          const target = this.portals.find(pt => pt.pair === pair && pt !== portal)
-          if (target){
-            this.predicted.x = target.x + CFG.CELL/2
-            this.predicted.y = target.y + CFG.CELL/2
-            this.local.x = this.predicted.x
-            this.local.y = this.predicted.y
-            this.sfx.respawn(0, 1)
-            break
-          }
-        }
-      }
-    }
-
-    // Анимация движущихся стен
-    if (this.roomType === 'moving_walls'){
-      this._animateMovingWalls(time, dt)
-    }
 
     if (time - this._lastPing > 5000){
       this._lastPing = time
@@ -3486,59 +3692,20 @@ class GameScene extends Phaser.Scene {
     if (me) this.cameras.main.centerOn(me.sprite.x, me.sprite.y)
   }
 
-  _animateMovingWalls(time, dt){
-    if (!this.movingWallSprites) return
-    for (let i = 0; i < this.movingWallSprites.length; i++){
-      const entry = this.movingWallSprites[i]
-      const mw = entry.data
-      if (!mw) continue
-      if (mw.kind === 'rotate'){
-        mw.angle += mw.angleSpeed
-        entry.sprite.setAngle(mw.angle * 180 / Math.PI)
-      } else {
-        mw.offset += mw.offsetSpeed * dt
-        if (Math.abs(mw.offset) > mw.offsetRange) mw.offsetSpeed *= -1
-        const w = mw.wall
-        entry.sprite.x = w.x + mw.offset
-        entry.sprite.y = w.y + mw.offset
-      }
+  _updateCartVisual(cart){
+    if (!cart) return
+    if (this.cartSprite && cart.x !== undefined){
+      this.cartSprite.setPosition(cart.x, cart.y)
     }
-  }
-
-  _updatePortalSprites(){
-    if (!this.portals) return
-    // Remove old portal visuals and recreate
-    for (const ps of (this._portalVisuals || [])){
-      ps.glow?.destroy()
-      ps.sprite?.destroy()
-      ps.text?.destroy()
-    }
-    this._portalVisuals = []
-    for (let i = 0; i < this.portals.length; i++){
-      const portal = this.portals[i]
-      const color = portal.pair === 'a' ? 0x00ffff : 0xff00ff
-      const glow = this.add.circle(portal.x + 20, portal.y + 20, 25, color, 0.4)
-        .setDepth(-5).setAlpha(0.5)
-      const sprite = this.add.circle(portal.x + 20, portal.y + 20, 18, color, 0.7)
-        .setDepth(-4).setAlpha(0.8)
-      const text = this.add.text(portal.x + 20, portal.y + 20, portal.pair.toUpperCase(), {
-        fontFamily: 'monospace', fontSize: '14px', color: '#ffffff'
-      }).setOrigin(0.5).setDepth(-3)
-      this._portalVisuals.push({glow, sprite, text, data:portal})
-    }
-  }
-
-  _updateMovingWallSprites(wallData){
-    if (!wallData) return
-    for (const mwData of wallData){
-      const idx = mwData.wallIndex
-      if (!this.wallSprites[idx]) continue
-      if (mwData.kind === 'rotate'){
-        this.wallSprites[idx].setAngle(mwData.angle * 180 / Math.PI)
-        this.wallSprites[idx].setOrigin(0.5, 0.5)
-      } else {
-        this.wallSprites[idx].setOrigin(0, 0)
-      }
+    if (this.roomType === 'delivery' && this.deliveryBarEl){
+      const total = Math.abs(CART_END.x - CART_START.x)
+      const dstEnd = Math.max(0, Math.min(total, CART_END.x - cart.x))
+      const pct = Math.max(0, Math.min(100, (total - dstEnd) / total * 100))
+      this.dbarFillEl.style.width = pct + '%'
+      const rA = (cart.rounds && cart.rounds[0]) || 0
+      const rB = (cart.rounds && cart.rounds[1]) || 0
+      this.deliveryRoundAEl.textContent = '🍗 ' + rA
+      this.deliveryRoundBEl.textContent = '🛡 ' + rB
     }
   }
 
@@ -3663,12 +3830,13 @@ class GameScene extends Phaser.Scene {
         row.className = 'lobbyRow'
         const locked = !!r.private
         const full = Number(r.players) >= Number(r.maxPlayers || 12)
-        const typeEmoji = {basic:'🗺', portals:'🌀', moving_walls:'🔄', king_of_hill:'👑'}
-      const roomTypeIcon = typeEmoji[r.type] || '🗺'
+        const scoreLimit = Number(r.scoreLimit) || 100
+const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
+        const roomTypeIcon = typeEmoji[r.type] || '🗺'
         row.innerHTML = `
           <div class="lobbyMain">
             <div class="lobbyName">${escapeHtml(r.name || r.id)}</div>
-            <div class="lobbyMeta">#${escapeHtml(r.id)} · ${r.players}/${r.maxPlayers || 12} игроков · ${roomTypeIcon}</div>
+            <div class="lobbyMeta">#${escapeHtml(r.id)} · ${r.players}/${r.maxPlayers || 12} игроков · ${roomTypeIcon} · лимит: ${scoreLimit}</div>
           </div>
           <div class="lobbyLock">${locked ? '🔒' : '🌐'}</div>
           <button class="lobbyJoin" ${full ? 'disabled' : ''}>${full ? 'ПОЛНО' : 'ВОЙТИ'}</button>
@@ -3681,7 +3849,7 @@ class GameScene extends Phaser.Scene {
             lobbyStatus('Введите пароль для «' + (r.name || r.id) + '»')
             document.getElementById('privatePassword').focus()
           } else {
-            startGame(r.id, '', r.name || r.id, r.type || 'basic')
+            startGame(r.id, '', r.name || r.id, r.type || 'basic', scoreLimit)
           }
         })
         box.appendChild(row)
@@ -3701,6 +3869,13 @@ class GameScene extends Phaser.Scene {
     const kind = document.getElementById('newLobbyType').value
     const password = String(document.getElementById('newLobbyPassword').value || '').trim().slice(0,32)
     const roomType = document.getElementById('newRoomType').value
+    const scoreValue = Number(document.getElementById('newLobbyScoreLimit').value)
+    const delDefault = roomType === 'delivery' ? 3 : 100
+    const scoreLimit = Number.isFinite(scoreValue) && scoreValue > 0
+      ? (roomType === 'delivery'
+          ? clamp(Math.floor(scoreValue), 1, 20)
+          : clamp(Math.floor(scoreValue), 1, 100000))
+      : delDefault
 
     if (!lobbyName){ lobbyStatus('Укажи название лобби.', true); return }
     if (kind === 'private' && !password){
@@ -3714,12 +3889,13 @@ class GameScene extends Phaser.Scene {
         name:lobbyName,
         private:kind === 'private',
         password,
-        roomType: roomType
+        roomType: roomType,
+        scoreLimit: scoreLimit
       })
       document.getElementById('newLobbyName').value = ''
       document.getElementById('newLobbyPassword').value = ''
       lobbyStatus('Лобби создано.')
-      startGame(msg.room, password, lobbyName, roomType)
+      startGame(msg.room, password, lobbyName, roomType, scoreLimit)
     } catch(e){
       lobbyStatus('Не удалось создать лобби: ' + (e.message || e), true)
     }
@@ -3729,16 +3905,19 @@ class GameScene extends Phaser.Scene {
     if (!selectedPrivateLobby) return
     const password = String(document.getElementById('privatePassword').value || '').trim()
     if (!password){ lobbyStatus('Введите пароль.', true); return }
-    startGame(selectedPrivateLobby.id, password, selectedPrivateLobby.name || selectedPrivateLobby.id, selectedPrivateLobby.type || 'basic')
+    startGame(selectedPrivateLobby.id, password, selectedPrivateLobby.name || selectedPrivateLobby.id, selectedPrivateLobby.type || 'basic', selectedPrivateLobby.scoreLimit || 100)
   }
 
-  function startGame(roomId, roomPassword='', lobbyName='', roomType='basic'){
+  function startGame(roomId, roomPassword='', lobbyName='', roomType='basic', scoreLimit=100){
     const rawName = document.getElementById('nameInput').value || ''
     const name = cleanName(rawName) || ('Player' + Math.floor(Math.random()*999))
     DBG.log('BOOT', 'starting lobby:', roomId, 'name:', name, 'lobby:', lobbyName)
     closeLobbySocket()
     document.getElementById('menu').style.display = 'none'
     document.getElementById('privateJoinBox').style.display = 'none'
+    document.getElementById('gameWrap').style.display = 'block'
+    document.getElementById('ui').style.display = 'block'
+    document.getElementById('matchEnd').style.display = 'none'
 
     try {
       sfx.init()
@@ -3762,6 +3941,7 @@ class GameScene extends Phaser.Scene {
           game.registry.set('sfx', sfx)
           game.registry.set('lobbyName', lobbyName)
           game.registry.set('roomType', roomType)
+          game.registry.set('scoreLimit', scoreLimit)
         }
       },
     })

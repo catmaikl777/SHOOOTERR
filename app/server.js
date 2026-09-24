@@ -29,7 +29,30 @@ const SPAWNS=[
 ];
 
 const KING_OF_HILL={x:CFG.W/2,y:CFG.H/2,r:150,scorePerSecond:1};
-const ROOM_TYPES=new Set(['basic','portals','moving_walls','king_of_hill']);
+const ROOM_TYPES=new Set(['basic','king_of_hill','delivery']);
+
+// =========================
+// ДОСТАВКА КОРМА (payload)
+// =========================
+
+const CART_START={x:220,y:CFG.H/2};
+const CART_END={x:CFG.W-220,y:CFG.H/2};
+const CART_CONTROL_R=72;
+const CART_SPEED=62;
+
+// =========================
+// КИЛ-СТРИКИ
+// =========================
+
+const KS_BONUS_AWARD=true;
+const KS_DEF=[
+  {kills:3,label:'УБИЙЦА',bonus:1},
+  {kills:5,label:'ПОГОНЩИК',bonus:2},
+  {kills:7,label:'КОШАЧИЙ КОШМАР',bonus:3},
+  {kills:10,label:'ЛЕГЕНДА АРЕНЫ',bonus:5}
+];
+
+const COLOR_COUNT=12;
 
 function generateKingOfHillWalls(){
   const cs=CFG.CELL;
@@ -143,44 +166,16 @@ function generateWalls(seed, type){
     }
   }
 
-  // Дополнительные стены для особых типов комнат
-  if(type === 'moving_walls'){
-    // Добавляем дополнительные стены, которые будут двигаться/вращаться
-    for(let i=0;i<15;i++){
-      const c=3+Math.floor(rng()*(cols-6));
-      const r=3+Math.floor(rng()*(rows-6));
-      const len=1+Math.floor(rng()*4);
-      const hor=rng()<.5;
-      for(let j=0;j<len;j++){
-        const cc=hor?c+j:c, rr=hor?r:r+j;
-        if(cc>=cols-1||rr>=rows-1)break;
-        if(!near(cc*cs+cs/2,rr*cs+cs/2)){
-          push(cc,rr);
-        }
-      }
-    }
-  } else if(type === 'portals'){
-    // Добавляем чуть больше стен для портальной комнаты
-    for(let i=0;i<10;i++){
-      const c=3+Math.floor(rng()*(cols-6));
-      const r=3+Math.floor(rng()*(rows-6));
-      const len=1+Math.floor(rng()*2);
-      const hor=rng()<.5;
-      for(let j=0;j<len;j++){
-        const cc=hor?c+j:c, rr=hor?r:r+j;
-        if(cc>=cols-1||rr>=rows-1)break;
-        if(!near(cc*cs+cs/2,rr*cs+cs/2)){
-          push(cc,rr);
-        }
-      }
-    }
-  }
-
   return out;
 }
 
 function clamp(v,a,b){
   return Math.max(a,Math.min(b,v));
+}
+
+function normalizeScoreLimit(value){
+  const n=Number(value);
+  return Number.isFinite(n)?clamp(Math.floor(n),1,100000):100;
 }
 
 function segIntersectsRect(x1,y1,x2,y2,r){
@@ -466,7 +461,7 @@ function updateKingOfHill(room,now){
   const contested=occupants.length>1;
   const owner=occupants.length===1?occupants[0]:null;
   if(owner!==h.owner)h.lastScoredAt=now;
-  if(owner){
+  if(owner&&!room.matchOver){
     const p=room.players.get(owner);
     const elapsed=now-(h.lastScoredAt||now);
     if(p&&elapsed>=1000){
@@ -477,6 +472,144 @@ function updateKingOfHill(room,now){
   }
   h.owner=owner;
   h.contested=contested;
+  checkMatchEnd(room);
+}
+
+function checkMatchEnd(room){
+  if(room.matchOver)return;
+
+  if(room.type === 'delivery'){
+    if(!room.cart)return;
+    for(let t=0;t<2;t++){
+      if(room.cart.rounds[t] >= room.scoreLimit){
+        room.matchOver=true;
+        room.winnerId='team'+t;
+        return;
+      }
+    }
+    return;
+  }
+
+  let winnerId=null;
+  let bestScore=room.scoreLimit-1;
+  for(const p of room.players.values()){
+    if((p.score||0)>bestScore){
+      bestScore=p.score||0;
+      winnerId=p.id;
+    }
+  }
+  if(winnerId){
+    room.matchOver=true;
+    room.winnerId=winnerId;
+  }
+}
+
+function handleKill(room,killer,victim,now){
+  if(!killer||killer.id===victim.id)return;
+
+  const wasStreak=victim.killStreak||0;
+
+  killer.killStreak=(killer.killStreak||0)+1;
+  killer.totalKills=(killer.totalKills||0)+1;
+  victim.killStreak=0;
+
+  if(room.matchOver)return;
+
+  killer.score++;
+
+  for(const ks of KS_DEF){
+    if(killer.killStreak===ks.kills){
+      killer.score+=ks.bonus;
+      broadcast(
+        room,
+        {
+          a:'ks',
+          d:{
+            pid:killer.id,
+            streak:killer.killStreak,
+            name:killer.name||killer.id.slice(0,6),
+            label:ks.label,
+            bonus:ks.bonus
+          }
+        }
+      );
+      break;
+    }
+  }
+
+  if(wasStreak>=3){
+    broadcast(
+      room,
+      {
+        a:'ks',
+        d:{
+          pid:victim.id,
+          ended:true,
+          streak:wasStreak,
+          name:victim.name||victim.id.slice(0,6)
+        }
+      }
+    );
+  }
+
+  checkMatchEnd(room);
+}
+
+function updateCart(room,now,dt){
+  const cart=room.cart;
+  if(!cart||!room.started)return;
+
+  let fwd=0;
+  let back=0;
+
+  for(const p of room.players.values()){
+    if(p.dead)continue;
+    const dx=p.x-cart.x;
+    const dy=p.y-cart.y;
+    if(dx*dx+dy*dy>CART_CONTROL_R*CART_CONTROL_R)continue;
+    if((p.team||0)===0)fwd++;
+    else back++;
+  }
+
+  if(fwd>0&&back===0){
+    cart.x+=CART_SPEED*dt;
+    cart.team='team0';
+  } else if(back>0&&fwd===0){
+    cart.x-=CART_SPEED*dt;
+    cart.team='team1';
+  }
+
+  if(cart.x<=CART_START.x){
+    if(cart.progress>0.02){
+      cart.rounds[1]++;
+      broadcast(room,{a:'deliver',d:{team:1,rounds:cart.rounds.slice(0)}});
+      checkMatchEnd(room);
+    }
+    cart.x=CART_START.x;
+    cart.progress=0;
+    cart.team=null;
+  } else if(cart.x>=CART_END.x){
+    cart.rounds[0]++;
+    broadcast(room,{a:'deliver',d:{team:0,rounds:cart.rounds.slice(0)}});
+    cart.x=CART_START.x;
+    cart.progress=0;
+    cart.team=null;
+    checkMatchEnd(room);
+  } else {
+    cart.progress=(cart.x-CART_START.x)/(CART_END.x-CART_START.x);
+  }
+}
+
+function tryStartMatch(room){
+  if(room.started||room.matchOver)return;
+  if(room.players.size===0)return;
+
+  for(const p of room.players.values()){
+    if(!p.ready)return;
+  }
+
+  room.started=true;
+  broadcast(room,{a:'start',d:{started:true}});
 }
 
 
@@ -665,10 +798,14 @@ function playerPack(room,now,viewerId){
 
   const scores={};
   const names={};
+  const colors={};
+  const teams={};
 
   for(const [id,v] of room.players){
     scores[id]=Math.round(v.score||0);
     names[id]=v.name||id.slice(0,6);
+    colors[id]=(typeof v.color==='number'&&v.color>=0)?v.color:-1;
+    teams[id]=v.team||0;
   }
 
   const pickups=
@@ -692,16 +829,11 @@ function playerPack(room,now,viewerId){
     p,
     scores,
     names,
+    colors,
+    teams,
     pickups,
     roomData: {
       type: room.type || 'basic',
-      portals: room.portals.map(p => ({x:Math.round(p.x), y:Math.round(p.y), pair:p.pair, active:p.active})),
-      movingWalls: room.movingWalls.map(mw => ({
-        wallIndex: mw.wallIndex,
-        kind: mw.kind,
-        angle: Math.round(mw.angle * 1000) / 1000,
-        offset: Math.round(mw.offset * 100) / 100,
-      })),
       hill: room.hill ? {
         x: room.hill.x,
         y: room.hill.y,
@@ -709,7 +841,20 @@ function playerPack(room,now,viewerId){
         owner: room.hill.owner,
         contested: room.hill.contested,
         progress: 0
-      } : null
+      } : null,
+      cart: room.cart ? {
+        x: Math.round(room.cart.x),
+        y: Math.round(room.cart.y),
+        progress: Math.round(room.cart.progress*10000)/10000,
+        rounds: [room.cart.rounds[0], room.cart.rounds[1]],
+        team: room.cart.team
+      } : null,
+      match: {
+        scoreLimit: room.scoreLimit,
+        over: !!room.matchOver,
+        winnerId: room.winnerId || null,
+        started: !!room.started
+      }
     }
   };
 }
@@ -924,7 +1069,7 @@ function explode(room,b,now){
       killed=true;
 
       const s=room.players.get(b.owner);
-      if(s)s.score++;
+      handleKill(room,s,t,now);
     }
 
     hits.push({
@@ -962,39 +1107,6 @@ function explode(room,b,now){
 // =========================
 
 function tickRoom(room,now,dt){
-
-  // Обновление движущихся стен
-  for(const mw of room.movingWalls){
-    if(mw.kind === 'rotate'){
-      mw.angle += mw.angleSpeed;
-    } else {
-      mw.offset += mw.offsetSpeed * dt;
-      if(Math.abs(mw.offset) > mw.offsetRange) mw.offsetSpeed *= -1;
-    }
-  }
-
-  // Порталы: телепортация игроков
-  if(room.portals.length > 0){
-    for(const p of room.players.values()){
-      if(p.dead) continue;
-      for(const portal of room.portals){
-        const dx = p.x - portal.x;
-        const dy = p.y - portal.y;
-        if(dx*dx + dy*dy < 60*60){
-          // Найти портал-пару
-          const pair = portal.pair === 'a' ? 'b' : 'a';
-          const target = room.portals.find(pt => pt.pair === pair && pt !== portal);
-          if(target){
-            p.x = target.x;
-            p.y = target.y;
-            p.vx = 0;
-            p.vy = 0;
-            break;
-          }
-        }
-      }
-    }
-  }
 
   // Players
   for(const p of room.players.values()){
@@ -1052,7 +1164,7 @@ function tickRoom(room,now,dt){
 
 
     // GRENADE
-    if(p.input.tseq>p.lastTseq){
+    if(room.started&&p.input.tseq>p.lastTseq){
       p.lastTseq=p.input.tseq;
 
       if(
@@ -1071,6 +1183,7 @@ function tickRoom(room,now,dt){
 
     // SHOOT
     if(
+      room.started &&
       p.input.w!==1 &&
       p.input.f
     ){
@@ -1091,7 +1204,7 @@ function tickRoom(room,now,dt){
 
 
     // PICKUPS
-    for(
+    if(room.started)for(
       let i=room.pickups.length-1;
       i>=0;
       i--
@@ -1124,7 +1237,11 @@ function tickRoom(room,now,dt){
     }
   }
 
+  if(room.started){
+
   if(room.type==='king_of_hill')updateKingOfHill(room,now);
+
+  if(room.type==='delivery')updateCart(room,now,dt);
 
 
   // Pickup spawning
@@ -1454,7 +1571,7 @@ function tickRoom(room,now,dt){
               b.owner
             );
 
-          if(s)s.score++;
+          handleKill(room,s,t,now);
         }
 
         broadcast(
@@ -1486,6 +1603,8 @@ function tickRoom(room,now,dt){
 
     if(hitPlayer)continue;
   }
+
+  } // end if(room.started)
 
 
   // =========================
@@ -1596,6 +1715,12 @@ function createPlayer(room,id,ws){
     dead:false,
     score:0,
 
+    color:-1,
+    ready:false,
+    team:(room.teamSeq++)%2,
+    killStreak:0,
+    totalKills:0,
+
     spawnIndex:n,
 
     name:id.slice(0,6),
@@ -1660,6 +1785,10 @@ function leave(ws){
     );
 
     room.clients.delete(ws);
+
+    if(!room.started&&!room.matchOver){
+      tryStartMatch(room);
+    }
 
     broadcast(
       room,
@@ -1752,7 +1881,8 @@ function lobbyList(){
       private:!!meta.private,
       players,
       maxPlayers:MAX_PLAYERS,
-      type: meta.type || 'basic'
+      type: meta.type || 'basic',
+      scoreLimit: room ? room.scoreLimit : normalizeScoreLimit(meta.scoreLimit)
     });
   }
 
@@ -1804,7 +1934,8 @@ function ensureRoom(
     name:roomId,
     private:false,
     password:'',
-    type:'basic'
+    type:'basic',
+    scoreLimit:100
   }
 ){
 
@@ -1814,6 +1945,10 @@ function ensureRoom(
   if(!room){
 
     const type = meta.type || 'basic';
+
+    const scoreLimit = type === 'delivery'
+      ? clamp(normalizeScoreLimit(meta.scoreLimit), 1, 20)
+      : normalizeScoreLimit(meta.scoreLimit);
 
     room={
       id:roomId,
@@ -1827,46 +1962,16 @@ function ensureRoom(
       lastState:0,
       lastTick:Date.now(),
       type:type,
-      portals:[],
-      movingWalls:[],
+      scoreLimit,
+      started:false,
+      matchOver:false,
+      winnerId:null,
+      teamSeq:0,
       hill:{...KING_OF_HILL,owner:null,contested:false,lastScoredAt:Date.now()},
+      cart:type==='delivery'
+        ?{x:CART_START.x, y:CART_START.y, progress:0, rounds:[0,0], team:null}
+        :null,
     };
-
-    if(type === 'portals'){
-      const prng=mulberry32(hashStr(roomId+'_portals'));
-      for(let i=0;i<4;i++){
-        const px = 150 + Math.floor(prng()*(CFG.W-300));
-        const py = 150 + Math.floor(prng()*(CFG.H-300));
-        room.portals.push({x:px, y:py, pair: i%2===0?'a':'b', active:true});
-      }
-    } else if(type === 'moving_walls'){
-      const mrng=mulberry32(hashStr(roomId+'_moving'));
-      const movableWalls = room.walls.filter(w => !(w.w===CFG.CELL && (w.x===0||w.y===0||w.x+w.w===CFG.W||w.y+w.h===CFG.H)));
-      const count = Math.min(8, movableWalls.length);
-      const usedWalls = new Set();
-      for(let i=0;i<count;i++){
-        let idx = Math.floor(mrng()*movableWalls.length);
-        let attempts = 0;
-        while(usedWalls.has(idx) && attempts < 20){
-          idx = Math.floor(mrng()*movableWalls.length);
-          attempts++;
-        }
-        if(usedWalls.has(idx)) continue;
-        usedWalls.add(idx);
-        const w = movableWalls[idx];
-        if(!w) continue;
-        room.movingWalls.push({
-          wallIndex: idx,
-          wall: w,
-          kind: mrng() < 0.5 ? 'rotate' : 'translate',
-          angle: 0,
-          angleSpeed: (mrng()-0.5)*0.02,
-          offset: 0,
-          offsetSpeed: (mrng()-0.5)*2,
-          offsetRange: 20 + mrng()*30,
-        });
-      }
-    }
 
     rooms.set(
       roomId,
@@ -1991,6 +2096,7 @@ wss.on(
           const roomType = ROOM_TYPES.has(msg.roomType)
             ? msg.roomType
             : 'basic';
+          const scoreLimit=normalizeScoreLimit(msg.scoreLimit);
 
           const password=
             String(
@@ -2018,7 +2124,8 @@ wss.on(
               name,
               private:priv,
               password,
-              type: roomType
+              type: roomType,
+              scoreLimit: scoreLimit
             }
           );
 
@@ -2029,7 +2136,8 @@ wss.on(
               room:id,
               name,
               private:priv,
-              roomType: roomType
+              roomType: roomType,
+              scoreLimit: scoreLimit
             }
           );
 
@@ -2064,7 +2172,8 @@ wss.on(
               name:rid,
               private:false,
               password:'',
-              type:'basic'
+              type:'basic',
+              scoreLimit:100
             };
 
           const room=
@@ -2135,7 +2244,9 @@ wss.on(
                 id:rid,
                 name:meta.name,
                 private:!!meta.private,
-                type: meta.type || 'basic'
+                type: meta.type || 'basic',
+                scoreLimit: room.scoreLimit,
+                started: !!room.started
               }
             }
           );
@@ -2233,6 +2344,30 @@ wss.on(
                 String(
                   d.name
                 ).slice(0,24);
+            }
+          }
+
+
+          // Ready / цвет
+          else if(a==='ready'){
+
+            const p=
+              room.players.get(
+                ws.peerId
+              );
+
+            if(p){
+              if(
+                Number.isInteger(d.color)&&
+                d.color>=0&&
+                d.color<COLOR_COUNT
+              ){
+                p.color=d.color;
+              }
+
+              if(d.ready)p.ready=true;
+
+              tryStartMatch(room);
             }
           }
 
