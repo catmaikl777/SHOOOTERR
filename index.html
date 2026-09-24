@@ -70,6 +70,11 @@
             background:#30363d;color:#e6edf3;border:0;border-radius:6px;
             z-index:7;pointer-events:auto;cursor:pointer;}
   #soundBtn:active{background:#484f58;}
+  #exitBtn{position:fixed;top:8px;left:8px;width:44px;height:44px;
+           padding:0;font-size:18px;line-height:44px;text-align:center;
+           background:#30363d;color:#e6edf3;border:0;border-radius:6px;
+           z-index:7;pointer-events:auto;cursor:pointer;}
+  #exitBtn:active{background:#484f58;}
   #voteInfo{position:fixed;top:44px;right:8px;color:#ff2266;
             font:clamp(10px,1.6vmin,14px) monospace;
             z-index:7;text-align:right;pointer-events:none;white-space:pre;line-height:1.4;}
@@ -335,6 +340,7 @@
 </div>
 <button id="voteBtn" style="display:none">VOTE HOST</button>
 <button id="soundBtn" style="display:none">🔊</button>
+<button id="exitBtn" style="display:none">✕</button>
 <div id="actionBtns" style="display:none">
   <button id="weaponBtn">🔫</button>
   <button id="dashBtn">⚡</button>
@@ -466,6 +472,7 @@ const AC_CFG = {
 }
 
 const APP_ID = 'p2p-shooter-identity-v1'
+const NAME_KEY = 'p2p_name'
 const VOTE_DURATION_MS = 20000
 const RELAY_URL = 'wss://shoooterr.relaxdev.ru'
 const GAME_LAST_UPDATE = '2026-09-24T18:02:01+07:00'
@@ -1417,11 +1424,20 @@ class GameScene extends Phaser.Scene {
     this.voteBtn  = document.getElementById('voteBtn')
     this.voteInfo = document.getElementById('voteInfo')
     this.soundBtn = document.getElementById('soundBtn')
+    this.exitBtn = document.getElementById('exitBtn')
     this.voteBtn.style.display = ''
     this.soundBtn.style.display = ''
+    this.exitBtn.style.display = ''
     this.soundBtn.textContent = this.sfx.enabled ? '🔊' : '🔇'
     this.voteBtn.addEventListener('click', ()=> this.onVoteClick())
     this.soundBtn.addEventListener('click', ()=> this.toggleSound())
+    this.exitBtn.addEventListener('click', ()=>{
+      if (this.returningToMenu) return
+      if (this.ws && this.ws.readyState === 1){
+        try { this.ws.send(JSON.stringify({ data:{ a:'leave' } })) } catch {}
+      }
+      this.returnToMenu()
+    })
 
     this.killfeedEl = document.getElementById('killfeed')
     this.vignetteEl = document.getElementById('vignette')
@@ -1800,6 +1816,7 @@ class GameScene extends Phaser.Scene {
     if (this.actionBtns) this.actionBtns.style.display = 'none'
     if (this.voteBtn) this.voteBtn.style.display = 'none'
     if (this.soundBtn) this.soundBtn.style.display = 'none'
+    if (this.exitBtn) this.exitBtn.style.display = 'none'
     if (this.matchEndEl) this.matchEndEl.style.display = 'none'
     if (this.pregameEl) this.pregameEl.style.display = 'none'
     if (this.deliveryBarEl) this.deliveryBarEl.style.display = 'none'
@@ -4050,6 +4067,12 @@ const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
   document.getElementById('refreshLobbies').addEventListener('click', refreshLobbies)
   document.getElementById('createLobbyBtn').addEventListener('click', createLobby)
   document.getElementById('privateJoinBtn').addEventListener('click', joinPrivateLobby)
+  const nameInputEl = document.getElementById('nameInput')
+  const savedName = localStorage.getItem(NAME_KEY)
+  if (savedName && nameInputEl) nameInputEl.value = cleanName(savedName) || ''
+  if (nameInputEl) nameInputEl.addEventListener('input', ()=>{
+    localStorage.setItem(NAME_KEY, nameInputEl.value || '')
+  })
   document.getElementById('newLobbyType').addEventListener('change', ()=>{
     document.getElementById('newLobbyPassword').style.display =
       document.getElementById('newLobbyType').value === 'private' ? 'block' : 'none'

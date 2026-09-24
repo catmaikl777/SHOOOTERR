@@ -588,22 +588,20 @@ function updateCart(room,now,dt){
     cart.team='team1';
   }
 
-  if(cart.x<=CART_START.x){
-    if(cart.progress>0.02){
-      cart.rounds[1]++;
-      broadcast(room,{a:'deliver',d:{team:1,rounds:cart.rounds.slice(0)}});
-      checkMatchEnd(room);
-    }
+if(cart.x<=CART_START.x){
+    cart.rounds[1]++;
+    broadcast(room,{a:'deliver',d:{team:1,rounds:cart.rounds.slice(0)}});
+    checkMatchEnd(room);
     cart.x=CART_CX;
     cart.progress=0.5;
     cart.team=null;
   } else if(cart.x>=CART_END.x){
     cart.rounds[0]++;
     broadcast(room,{a:'deliver',d:{team:0,rounds:cart.rounds.slice(0)}});
+    checkMatchEnd(room);
     cart.x=CART_CX;
     cart.progress=0.5;
     cart.team=null;
-    checkMatchEnd(room);
   } else {
     cart.progress=(cart.x-CART_START.x)/(CART_END.x-CART_START.x);
   }
