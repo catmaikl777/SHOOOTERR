@@ -28,6 +28,48 @@ const SPAWNS=[
   {x:CFG.W/2,y:CFG.H-120}
 ];
 
+const KING_OF_HILL={x:CFG.W/2,y:CFG.H/2,r:150,scorePerSecond:1};
+const ROOM_TYPES=new Set(['basic','portals','moving_walls','king_of_hill']);
+
+function generateKingOfHillWalls(){
+  const cs=CFG.CELL;
+  const cols=Math.floor(CFG.W/cs);
+  const rows=Math.floor(CFG.H/cs);
+  const used=new Set();
+  const out=[];
+  const push=(c,r)=>{
+    const k=c+','+r;
+    if(used.has(k))return;
+    used.add(k);
+    out.push({x:c*cs,y:r*cs,w:cs,h:cs});
+  };
+  const rect=(x,y,w,h)=>{
+    const c0=Math.round(x/cs);
+    const r0=Math.round(y/cs);
+    const c1=Math.round((x+w)/cs);
+    const r1=Math.round((y+h)/cs);
+    for(let c=c0;c<c1;c++)for(let r=r0;r<r1;r++)push(c,r);
+  };
+  for(let c=0;c<cols;c++){push(c,0);push(c,rows-1);}
+  for(let r=0;r<rows;r++){push(0,r);push(cols-1,r);}
+  const symmetric=(x,y,w,h)=>{
+    rect(x,y,w,h);
+    rect(CFG.W-x-w,y,w,h);
+    rect(x,CFG.H-y-h,w,h);
+    rect(CFG.W-x-w,CFG.H-y-h,w,h);
+  };
+  symmetric(80,280,240,40);
+  symmetric(360,360,160,40);
+  symmetric(480,400,40,200);
+  symmetric(640,400,40,160);
+  symmetric(800,280,40,160);
+  symmetric(680,480,80,40);
+  symmetric(520,680,40,120);
+  symmetric(120,600,160,40);
+  symmetric(280,760,120,40);
+  return out;
+}
+
 const rooms=new Map();
 const clients=new Map();
 const roomMeta=new Map();
@@ -56,6 +98,7 @@ function mulberry32(a){
 }
 
 function generateWalls(seed, type){
+  if(type==='king_of_hill')return generateKingOfHillWalls();
   const rng=mulberry32(hashStr(seed));
   const cs=CFG.CELL;
   const cols=Math.floor(CFG.W/cs);
@@ -406,6 +449,36 @@ function insideWall(room,x,y,r){
   );
 }
 
+function insideHill(room,x,y){
+  const h=room.hill;
+  const r=h.r+CFG.PLAYER_R;
+  const dx=x-h.x;
+  const dy=y-h.y;
+  return dx*dx+dy*dy<=r*r;
+}
+
+function updateKingOfHill(room,now){
+  const h=room.hill;
+  const occupants=[];
+  for(const p of room.players.values()){
+    if(!p.dead&&insideHill(room,p.x,p.y))occupants.push(p.id);
+  }
+  const contested=occupants.length>1;
+  const owner=occupants.length===1?occupants[0]:null;
+  if(owner!==h.owner)h.lastScoredAt=now;
+  if(owner){
+    const p=room.players.get(owner);
+    const elapsed=now-(h.lastScoredAt||now);
+    if(p&&elapsed>=1000){
+      const seconds=Math.floor(elapsed/1000);
+      p.score+=seconds*KING_OF_HILL.scorePerSecond;
+      h.lastScoredAt+=seconds*1000;
+    }
+  }
+  h.owner=owner;
+  h.contested=contested;
+}
+
 
 // =========================
 // PICKUPS
@@ -628,7 +701,15 @@ function playerPack(room,now,viewerId){
         kind: mw.kind,
         angle: Math.round(mw.angle * 1000) / 1000,
         offset: Math.round(mw.offset * 100) / 100,
-      }))
+      })),
+      hill: room.hill ? {
+        x: room.hill.x,
+        y: room.hill.y,
+        r: room.hill.r,
+        owner: room.hill.owner,
+        contested: room.hill.contested,
+        progress: 0
+      } : null
     }
   };
 }
@@ -1042,6 +1123,8 @@ function tickRoom(room,now,dt){
       }
     }
   }
+
+  if(room.type==='king_of_hill')updateKingOfHill(room,now);
 
 
   // Pickup spawning
@@ -1746,6 +1829,7 @@ function ensureRoom(
       type:type,
       portals:[],
       movingWalls:[],
+      hill:{...KING_OF_HILL,owner:null,contested:false,lastScoredAt:Date.now()},
     };
 
     if(type === 'portals'){
@@ -1904,7 +1988,9 @@ wss.on(
           }
 
           const priv=!!msg.private;
-          const roomType = msg.roomType || 'basic';
+          const roomType = ROOM_TYPES.has(msg.roomType)
+            ? msg.roomType
+            : 'basic';
 
           const password=
             String(

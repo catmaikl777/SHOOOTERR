@@ -275,6 +275,7 @@
         <option value="basic">🗺 Базовая</option>
         <option value="portals">🌀 Порталы</option>
         <option value="moving_walls">🔄 Движ. стены</option>
+        <option value="king_of_hill">👑 Царь горы</option>
       </select>
       <button id="createLobbyBtn">СОЗДАТЬ</button>
     </div>
@@ -1056,7 +1057,44 @@ const SPAWNS = [
   {x:120,y:CFG.H-120},{x:CFG.W-120,y:CFG.H-120},
   {x:CFG.W/2,y:120},{x:CFG.W/2,y:CFG.H-120},
 ]
+const KING_OF_HILL = { x: CFG.W / 2, y: CFG.H / 2, r: 150 }
+function generateKingOfHillWalls(){
+  const cs = CFG.CELL
+  const cols = Math.floor(CFG.W / cs)
+  const rows = Math.floor(CFG.H / cs)
+  const used = new Set(), out = []
+  const push = (c, r) => {
+    const k = c + ',' + r
+    if (used.has(k)) return
+    used.add(k)
+    out.push({ x:c*cs, y:r*cs, w:cs, h:cs })
+  }
+  const rect = (x, y, w, h) => {
+    const c0 = Math.round(x / cs), r0 = Math.round(y / cs)
+    const c1 = Math.round((x + w) / cs), r1 = Math.round((y + h) / cs)
+    for (let c = c0; c < c1; c++) for (let r = r0; r < r1; r++) push(c, r)
+  }
+  for (let c = 0; c < cols; c++){ push(c, 0); push(c, rows - 1) }
+  for (let r = 0; r < rows; r++){ push(0, r); push(cols - 1, r) }
+  const symmetric = (x, y, w, h) => {
+    rect(x, y, w, h)
+    rect(CFG.W - x - w, y, w, h)
+    rect(x, CFG.H - y - h, w, h)
+    rect(CFG.W - x - w, CFG.H - y - h, w, h)
+  }
+  symmetric(80, 280, 240, 40)
+  symmetric(360, 360, 160, 40)
+  symmetric(480, 400, 40, 200)
+  symmetric(640, 400, 40, 160)
+  symmetric(800, 280, 40, 160)
+  symmetric(680, 480, 80, 40)
+  symmetric(520, 680, 40, 120)
+  symmetric(120, 600, 160, 40)
+  symmetric(280, 760, 120, 40)
+  return out
+}
 function generateWalls(seedStr, type){
+  if (type === 'king_of_hill') return generateKingOfHillWalls()
   const rng = mulberry32(hashStr(seedStr))
   const cs = CFG.CELL
   const cols = Math.floor(CFG.W/cs), rows = Math.floor(CFG.H/cs)
@@ -1151,12 +1189,23 @@ class GameScene extends Phaser.Scene {
     this.myName = this.registry.get('playerName') || 'anon'
     this.sfx = this.registry.get('sfx')
     this.roomType = this.registry.get('roomType') || 'basic'
+    this.hillData = { ...KING_OF_HILL, owner:null, contested:false, progress:0 }
+    this.hillZone = null
+    this.hillLabel = null
 
     this.floorSprite = this.add.tileSprite(0, 0, CFG.W, CFG.H, 'floor')
       .setOrigin(0).setDepth(-20).setTint(CFG.FLOOR_COLOR).setAlpha(CFG.FLOOR_TINT_ALPHA)
     if (CFG.FLOOR_GLOW){
       this.add.rectangle(CFG.W/2, CFG.H/2, CFG.W, CFG.H, CFG.FLOOR_COLOR, 0.12)
         .setBlendMode(Phaser.BlendModes.ADD).setDepth(-19)
+    }
+
+    if (this.roomType === 'king_of_hill'){
+      this.hillZone = this.add.graphics().setDepth(-15)
+      this.hillLabel = this.add.text(KING_OF_HILL.x, KING_OF_HILL.y, 'ЦАРЬ ГОРЫ', {
+        fontFamily: 'monospace', fontSize: '18px', color: '#ffe066',
+        stroke: '#000000', strokeThickness: 4,
+      }).setOrigin(0.5).setDepth(-14)
     }
 
     this.wallRects = generateWalls(this.roomId, this.roomType)
@@ -2194,9 +2243,13 @@ class GameScene extends Phaser.Scene {
       if (v > 0 && v < 5000 && v > ping) ping = v
     }
     ping = Math.round(ping)
-    const typeEmoji = {basic:'🗺', portals:'🌀', moving_walls:'🔄'}
+    const typeEmoji = {basic:'🗺', portals:'🌀', moving_walls:'🔄', king_of_hill:'👑'}
     const typeIcon = typeEmoji[this.roomType] || '🗺'
-    this.statusEl.textContent = `${role} · ${myName} · ${this.roomId} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc} · ping: ${ping}ms`
+    let hillStatus = ''
+    if (this.roomType === 'king_of_hill'){
+      hillStatus = this.hillData.contested ? ' · зона: спор' : (this.hillData.owner === this.myPeerId ? ' · 👑 вы на горе' : '')
+    }
+    this.statusEl.textContent = `${role} · ${myName} · ${this.roomId} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc}${hillStatus} · ping: ${ping}ms`
   }
 
   renderBonuses(){
@@ -2263,6 +2316,7 @@ class GameScene extends Phaser.Scene {
 
     if (data.roomData){
       this.roomType = data.roomData.type || this.roomType
+      if (data.roomData.hill) this.hillData = { ...this.hillData, ...data.roomData.hill }
       if (data.roomData.portals){
         this.portalData = data.roomData.portals
         if (!this.portals) this.portals = []
@@ -2558,8 +2612,31 @@ class GameScene extends Phaser.Scene {
     this.grenadePreview.lineBetween(landing.x,landing.y-16,landing.x,landing.y+16)
   }
 
+  updateHillZone(time){
+    if (!this.hillZone) return
+    const h = this.hillData
+    const pulse = (Math.sin(time / 260) + 1) / 2
+    const color = h.contested ? 0xffaa33 : (h.owner === this.myPeerId ? 0x3fb950 : 0xffd84d)
+    this.hillZone.clear()
+    this.hillZone.fillStyle(color, h.contested ? 0.22 : 0.13)
+    this.hillZone.fillCircle(h.x, h.y, h.r)
+    this.hillZone.lineStyle(5, color, 0.9)
+    this.hillZone.strokeCircle(h.x, h.y, h.r)
+    this.hillZone.lineStyle(2, 0xffffff, 0.42)
+    this.hillZone.strokeCircle(h.x, h.y, h.r - 18 + pulse * 8)
+    this.hillZone.lineStyle(2, color, 0.35)
+    this.hillZone.strokeCircle(h.x, h.y, h.r * 0.42)
+    if (this.hillLabel){
+      const ownerName = h.owner ? (this.peerNames[h.owner] || h.owner.slice(0, 6)) : ''
+      this.hillLabel.setText(h.contested ? 'СПОР ЗОНЫ' : (ownerName ? '👑 ' + ownerName : 'ЦАРЬ ГОРЫ'))
+      this.hillLabel.setColor(h.owner === this.myPeerId ? '#3fb950' : '#ffe066')
+    }
+  }
+
   update(time, delta){
     const dt = Math.min(delta, 50) / 1000
+
+    this.updateHillZone(time)
 
     if (time - this.lastAcTick > 250){
       const dtAc = (time - this.lastAcTick) / 1000
@@ -3586,7 +3663,7 @@ class GameScene extends Phaser.Scene {
         row.className = 'lobbyRow'
         const locked = !!r.private
         const full = Number(r.players) >= Number(r.maxPlayers || 12)
-        const typeEmoji = {basic:'🗺', portals:'🌀', moving_walls:'🔄'}
+        const typeEmoji = {basic:'🗺', portals:'🌀', moving_walls:'🔄', king_of_hill:'👑'}
       const roomTypeIcon = typeEmoji[r.type] || '🗺'
         row.innerHTML = `
           <div class="lobbyMain">
