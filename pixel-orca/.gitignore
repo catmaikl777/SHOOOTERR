@@ -1,7 +1,0 @@
-node_modules/
-dist/
-server/data/
-.tmplog/
-.dbtest/
-*.log
-.DS_Store
