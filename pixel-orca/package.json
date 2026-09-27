@@ -1,0 +1,26 @@
+{
+  "name": "pixel-orca",
+  "version": "3.0.0",
+  "description": "Косатка Клик — пиксель-арт кликер с PvP, рейдами 3x3, кланами и сезонным ивентом",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js",
+    "build": "node tools/prepare-pages.mjs",
+    "preview": "node tools/serve-pages.mjs",
+    "icons": "node tools/make-icons.mjs",
+    "test": "npm run test:check && npm run test:sprites && npm run test:client && npm run test:server && npm run test:online",
+    "test:check": "node tools/checkclient.mjs",
+    "test:sprites": "node tools/checksprites.mjs",
+    "test:client": "node tools/smoke-client.mjs",
+    "test:server": "node tools/smoke-server.mjs",
+    "test:online": "node tools/smoke-online.mjs",
+    "test:dist": "node tools/prepare-pages.mjs && PO_DIR=dist node tools/smoke-online.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["clicker", "pixel-art", "multiplayer", "websocket", "game"],
+  "license": "MIT",
+  "private": true
+}

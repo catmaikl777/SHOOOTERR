@@ -1,0 +1,39 @@
+# ============================================================
+#  Render Blueprint — бэкенд PIXEL ORCA
+#  Как применить: Render → Blueprints → New Blueprint Instance → выбрать репозиторий
+#  Диск (disk) обязателен: без него аккаунты и кланы пропадут при каждом деплое.
+# ============================================================
+services:
+  - type: web
+    name: kosatka
+    runtime: node
+    plan: starter            # WebSocket на free-плане засыпает через 15 минут простоя
+    region: frankfurt        # europe
+    branch: main
+    buildCommand: ""         # сборки нет: зависимостей нет
+    startCommand: node pixel-orca/server/server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0        # Render сам подставляет PORT
+      - key: DATA_FILE
+        value: /data/db.json
+      - key: STATIC_DIR
+        value: /opt/render/project/src/pixel-orca
+      - key: PVP_MS
+        value: 30000
+      - key: RAID_MS
+        value: 60000
+      - key: TICK
+        value: 250
+      - key: SEASON_MS
+        value: 2592000000     # 30 дней
+    disk:
+      name: kosatka-data
+      mountPath: /data
+      sizeGB: 1

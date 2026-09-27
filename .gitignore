@@ -1,0 +1,16 @@
+# мусор от предыдущих сессий: копии .git и node_modules, лежавшие в корне
+# (имена начинаются с префикса-хэша репозитория, поэтому нужен ведущий *)
+*.git-*
+*.opencode-node_modules-*
+.opencode/
+app/node_modules/
+
+# зависимости и артефакты
+node_modules/
+pixel-orca/dist/
+pixel-orca/.tmplog/
+pixel-orca/.dbtest/
+pixel-orca/server/data/
+*.log
+.DS_Store
+Thumbs.db
