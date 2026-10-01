@@ -1,2 +1,2 @@
 [deploy]
-entry = "server.js" # Или путь к вашему главному файлу, например "npm run start"
+entry = "npm run start"
