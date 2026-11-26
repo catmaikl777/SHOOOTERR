@@ -259,6 +259,16 @@
   .menuPage .pageHint{font-size:12px;color:#8b949e;line-height:1.5;}
   .menuPage #p2pBox,.menuPage #localBox{width:100%;border:0;background:transparent;padding:0;}
   #swipeHint{font-size:11px;color:#8b949e;letter-spacing:2px;opacity:.7;}
+  #p2pRooms{display:flex;flex-direction:column;gap:6px;max-height:210px;overflow-y:auto;}
+  .p2pEmpty{font-size:12px;color:#8b949e;padding:8px 0;text-align:center;}
+  .p2pRoom{display:flex;align-items:center;gap:8px;background:#161b22;border:1px solid #30363d;
+          border-radius:10px;padding:8px 10px;text-align:left;}
+  .p2pRoomMain{flex:1;min-width:0;}
+  .p2pRoomName{font-size:13px;font-weight:700;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .p2pRoomMeta{font-size:11px;color:#8b949e;margin-top:2px;}
+  .p2pRoomJoin{padding:8px 12px;font-size:12px;border-radius:8px;border:1px solid #238636;
+              background:#238636;color:#fff;font-family:monospace;cursor:pointer;}
+  #p2pStatus{font-size:12px;color:#8b949e;min-height:16px;}
   #p2pSettings{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;}
   #p2pSettings select{padding:10px 8px;border-radius:8px;border:1px solid #30363d;
                       background:#161b22;color:#e6edf3;font-family:monospace;}
@@ -402,7 +412,7 @@
     <section class="menuPage">
       <h2>🌐 Игра с другом</h2>
       <div id="p2pBox">
-        <div class="pageHint">Без сервера. Создай бой и пришли другу ссылку.</div>
+        <div class="pageHint">Создай комнату — друг увидит её в списке и зайдёт сам.</div>
         <div id="p2pSettings">
           <select id="p2pRoomType">
             <option value="basic">🗺 Базовая</option>
@@ -413,14 +423,15 @@
         </div>
         <div class="btns">
           <button id="p2pCreate">Создать бой</button>
-          <button id="p2pJoinBtn">Войти по коду</button>
+          <button id="p2pJoinBtn">Код вручную</button>
         </div>
+        <div id="p2pRooms"><div class="p2pEmpty">Пока никого. Создай бой — друг увидит его здесь.</div></div>
+        <div id="p2pStatus"></div>
         <div id="p2pStage" style="display:none">
           <textarea id="p2pOut" readonly placeholder="код/ссылка для друга"></textarea>
           <div class="btns"><button id="p2pCopy">Скопировать</button></div>
           <textarea id="p2pIn" placeholder="вставь код от друга"></textarea>
           <div class="btns"><button id="p2pGo">Подключиться</button></div>
-          <div id="p2pStatus"></div>
         </div>
       </div>
     </section>
@@ -4652,18 +4663,20 @@ const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
     })
   }
 
-  /* ===== P2P без сервера: WebRTC + обмен кодом ===== */
+  /* ===== P2P: список комнат + WebRTC (код — аварийный вариант) ===== */
   const p2pStage = document.getElementById('p2pStage')
   const p2pOut = document.getElementById('p2pOut')
   const p2pIn = document.getElementById('p2pIn')
   const p2pGo = document.getElementById('p2pGo')
   const p2pStatusEl = document.getElementById('p2pStatus')
-  const SIG = { pc:null, dc:null, role:null, started:false }
+  const p2pRoomsEl = document.getElementById('p2pRooms')
+  const SIG = { pc:null, dc:null, role:null, started:false, rt:'basic', sl:25, roomTopic:null, joinTimer:0 }
   const p2pSay = t => { p2pStatusEl.textContent = t }
   const p2pReset = ()=>{
+    clearTimeout(SIG.joinTimer)
     try { SIG.dc && SIG.dc.close() } catch(e){}
     try { SIG.pc && SIG.pc.close() } catch(e){}
-    SIG.pc = null; SIG.dc = null; SIG.started = false
+    SIG.pc = null; SIG.dc = null; SIG.started = false; SIG.joinTimer = 0
   }
   const iceDone = pc => new Promise(res=>{
     if (pc.iceGatheringState === 'complete') return res()
@@ -4672,50 +4685,34 @@ const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
       if (pc.iceGatheringState === 'complete'){ clearTimeout(t); res() }
     })
   })
-  const encSig = o => btoa(JSON.stringify(o))
-  const decSig = s => JSON.parse(atob(String(s).trim()))
+  const encSig = o => {
+    const bytes = new TextEncoder().encode(JSON.stringify(o))
+    let bin = ''
+    for (const b of bytes) bin += String.fromCharCode(b)
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  }
+  const decSig = raw => {
+    let s = String(raw || '').trim()
+    const m = s.match(/[?&]p2p=([^&\s]+)/)
+    if (m){ try { s = decodeURIComponent(m[1]) } catch(e){ s = m[1] } }
+    s = s.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/')
+    while (s.length % 4) s += '='
+    const bin = atob(s)
+    const bytes = Uint8Array.from(bin, ch => ch.charCodeAt(0))
+    return JSON.parse(new TextDecoder().decode(bytes))
+  }
   const gameLink = code => location.href.split('#')[0].split('?')[0] + '?p2p=' + encodeURIComponent(code)
   const p2pLaunch = role => {
+    hostStop()
+    clearTimeout(SIG.joinTimer)
     const rt = SIG.rt || 'basic'
     const sl = Math.max(1, Math.min(500, Number(SIG.sl) || 25))
     window.__P2P = { dc: SIG.dc, role }
     setTimeout(() => startGame('p2p', '', 'P2P', rt, sl, false, 0, role), 80)
   }
 
-  document.getElementById('p2pCreate').addEventListener('click', async ()=>{
-    p2pReset()
-    SIG.role = 'host'
-    p2pStage.style.display = ''
-    p2pIn.style.display = ''
-    p2pGo.style.display = ''
-    p2pIn.value = ''
-    p2pOut.value = ''
-    p2pSay('Готовлю приглашение…')
-    try {
-      const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] })
-      SIG.pc = pc
-      const dc = pc.createDataChannel('game', { ordered:false, maxRetransmits:0 })
-      SIG.dc = dc
-      dc.onopen = ()=>{ if (!SIG.started){ SIG.started = true; p2pLaunch('host') } }
-      await pc.setLocalDescription(await pc.createOffer())
-      await iceDone(pc)
-      SIG.rt = document.getElementById('p2pRoomType').value || 'basic'
-      SIG.sl = Math.max(1, Math.min(500, Number(document.getElementById('p2pScoreLimit').value) || 25))
-      p2pOut.value = gameLink(encSig({ t:'offer', sdp:pc.localDescription, rt:SIG.rt, sl:SIG.sl }))
-      p2pSay('Отправь другу ссылку выше. Его ответ вставь ниже и нажми «Подключиться».')
-    } catch(e){ p2pSay('Ошибка: ' + e.message) }
-  })
-
-  document.getElementById('p2pJoinBtn').addEventListener('click', ()=>{
-    p2pReset()
-    SIG.role = 'guest'
-    p2pStage.style.display = ''
-    p2pOut.value = ''
-    p2pIn.value = ''
-    p2pIn.style.display = ''
-    p2pGo.style.display = ''
-    p2pSay('Вставь код-приглашение от хоста и нажми «Подключиться».')
-  })
+  document.getElementById('p2pCreate').addEventListener('click', ()=>{ hostStart() })
+  document.getElementById('p2pJoinBtn').addEventListener('click', ()=>{ p2pReset(); manualJoin() })
 
   async function p2pAccept(code){
     p2pStage.style.display = ''
@@ -4726,16 +4723,7 @@ const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
     SIG.rt = offer.rt || 'basic'
     SIG.sl = Math.max(1, Math.min(500, Number(offer.sl) || 25))
     try {
-      const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] })
-      SIG.pc = pc
-      pc.ondatachannel = e => {
-        SIG.dc = e.channel
-        SIG.dc.onopen = ()=>{ if (!SIG.started){ SIG.started = true; p2pLaunch('guest') } }
-      }
-      await pc.setRemoteDescription(offer.sdp || offer)
-      await pc.setLocalDescription(await pc.createAnswer())
-      await iceDone(pc)
-      p2pOut.value = encSig({ t:'answer', sdp:pc.localDescription })
+      p2pOut.value = encSig({ t:'answer', sdp: await guestAnswer(offer.sdp || offer) })
       p2pIn.style.display = 'none'
       p2pGo.style.display = 'none'
       p2pSay('Отправь этот код хосту. Бой начнётся, когда он его вставит.')
@@ -4756,6 +4744,207 @@ const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
     } else {
       await p2pAccept(v)
     }
+  })
+
+  /* --- общий WebRTC-хелпер для лобби и ручного кода --- */
+  const P2P_ICE = { iceServers:[{ urls:'stun:stun.l.google.com:19302' }] }
+  async function hostOffer(){
+    const pc = new RTCPeerConnection(P2P_ICE)
+    SIG.pc = pc
+    const dc = pc.createDataChannel('game', { ordered:false, maxRetransmits:0 })
+    SIG.dc = dc
+    dc.onopen = ()=>{ if (!SIG.started){ SIG.started = true; p2pLaunch('host') } }
+    dc.onclose = ()=>{ if (!SIG.started && SIG.role === 'host'){ p2pReset(); hostAnnounce() } }
+    await pc.setLocalDescription(await pc.createOffer())
+    await iceDone(pc)
+    return pc.localDescription
+  }
+  async function guestAnswer(sdp){
+    const pc = new RTCPeerConnection(P2P_ICE)
+    SIG.pc = pc
+    pc.ondatachannel = e => {
+      SIG.dc = e.channel
+      SIG.dc.onopen = ()=>{ if (!SIG.started){ SIG.started = true; p2pLaunch('guest') } }
+      SIG.dc.onclose = ()=>{ if (!SIG.started) p2pSay('Соединение не установилось.') }
+    }
+    await pc.setRemoteDescription(sdp)
+    await pc.setLocalDescription(await pc.createAnswer())
+    await iceDone(pc)
+    return pc.localDescription
+  }
+  function readP2PSettings(){
+    SIG.rt = document.getElementById('p2pRoomType').value || 'basic'
+    SIG.sl = Math.max(1, Math.min(500, Number(document.getElementById('p2pScoreLimit').value) || 25))
+  }
+  async function manualHost(){
+    p2pStage.style.display = ''
+    p2pIn.style.display = ''; p2pGo.style.display = ''
+    p2pIn.value = ''; p2pOut.value = ''
+    readP2PSettings()
+    p2pSay('Комнаты недоступны. Готовлю ссылку-приглашение…')
+    try {
+      const sdp = await hostOffer()
+      p2pOut.value = gameLink(encSig({ t:'offer', sdp, rt:SIG.rt, sl:SIG.sl }))
+      p2pSay('Отправь другу ссылку выше. Его ответ вставь ниже.')
+    } catch(e){ p2pSay('Ошибка: ' + e.message) }
+  }
+  function manualJoin(){
+    SIG.role = 'guest'
+    p2pStage.style.display = ''
+    p2pOut.value = ''; p2pIn.value = ''
+    p2pIn.style.display = ''; p2pGo.style.display = ''
+    p2pSay('Вставь код-приглашение и нажми «Подключиться».')
+  }
+
+  /* --- шина комнат: публичный signaling y-webrtc, без аккаунта --- */
+  const BUS_URL = 'wss://y-webrtc.fly.dev'
+  const BUS_LOBBY = 'snc/lobby/v1'
+  const BUS_ME = randomToken(4)
+  const roomTopic = id => 'snc/r/' + id
+  const busQueue = []
+  let busLink = null, busUp = false, busWait = null, busMsg = null
+  function busSend(p){
+    if (busUp && busLink && busLink.readyState === 1) busLink.send(JSON.stringify(p))
+    else busQueue.push(p)
+  }
+  const busSub = topics => busSend({ type:'subscribe', topics })
+  const busPub = (topic, data) => busSend({ type:'publish', topic, data: JSON.stringify({ ...data, from: BUS_ME }) })
+  function busConnect(){
+    if (busUp && busLink && busLink.readyState === 1) return Promise.resolve(true)
+    if (busWait) return busWait
+    let ws
+    try { ws = new WebSocket(BUS_URL) } catch(e){ return Promise.resolve(false) }
+    busLink = ws
+    busUp = false
+    busWait = new Promise(res=>{
+      const to = setTimeout(()=>res(false), 7000)
+      ws.onopen = ()=>{ busUp = true; clearTimeout(to); while (busQueue.length) ws.send(JSON.stringify(busQueue.shift())); res(true) }
+      ws.onerror = ()=>{ clearTimeout(to); res(false) }
+      ws.onclose = ()=>{ if (ws === busLink) busUp = false }
+      ws.onmessage = ev=>{
+        let m; try { m = JSON.parse(ev.data) } catch { return }
+        if (m.type !== 'publish' || !m.topic) return
+        let d; try { d = JSON.parse(m.data) } catch { return }
+        if (!d || d.from === BUS_ME) return
+        if (busMsg) busMsg(m.topic, d)
+      }
+    }).then(v=>{ busWait = null; return v })
+    return busWait
+  }
+
+  const lobbyRooms = new Map()
+  let lobbySig = ''
+  function lobbyRender(){
+    if (!p2pRoomsEl) return
+    const now = Date.now()
+    const rows = []
+    for (const [id, r] of lobbyRooms){
+      if (now - (r.ts || 0) > 15000) lobbyRooms.delete(id)
+      else rows.push(r)
+    }
+    const sig = rows.map(r => r.id + '|' + r.name + '|' + r.players).join(',')
+    if (sig === lobbySig) return
+    lobbySig = sig
+    if (!rows.length){
+      p2pRoomsEl.innerHTML = '<div class="p2pEmpty">Пока никого. Создай бой — друг увидит его здесь.</div>'
+      return
+    }
+    const icons = { basic:'🗺', king_of_hill:'👑', delivery:'🍲' }
+    p2pRoomsEl.innerHTML = rows.map(r => '<div class="p2pRoom"><div class="p2pRoomMain">'
+      + '<div class="p2pRoomName">' + escapeHtml(r.name || 'Бой') + '</div>'
+      + '<div class="p2pRoomMeta">' + (icons[r.mode] || '🗺') + ' · до ' + (Number(r.limit) || 25) + ' · ' + (Number(r.players) || 1) + '/2</div>'
+      + '</div><button class="p2pRoomJoin" data-room="' + escapeHtml(r.id) + '">ВОЙТИ</button></div>').join('')
+  }
+
+  let hosting = null
+  function hostStop(){
+    if (!hosting) return
+    clearInterval(hosting.beat)
+    busPub(BUS_LOBBY, { k:'bye', id: hosting.id })
+    hosting = null
+  }
+  function hostAnnounce(){
+    if (!hosting) return
+    busPub(BUS_LOBBY, {
+      k:'room', id: hosting.id, name: hosting.name, mode: hosting.mode,
+      limit: hosting.limit, players: SIG.dc ? 2 : 1, ts: Date.now(),
+    })
+  }
+  async function hostStart(){
+    p2pReset(); hostStop(); SIG.role = 'host'
+    readP2PSettings()
+    p2pSay('Создаю комнату…')
+    const ok = await busConnect()
+    if (!ok) return manualHost()
+    const id = randomToken(3)
+    const nick = cleanName(document.getElementById('nameInput').value || '') || 'Бой'
+    hosting = { id, name: nick, mode: SIG.rt, limit: SIG.sl, beat: 0, topic: roomTopic(id) }
+    busSub([BUS_LOBBY, hosting.topic])
+    hostAnnounce()
+    hosting.beat = setInterval(hostAnnounce, 3000)
+    p2pSay('Комната создана — ждём гостя.')
+  }
+  async function hostOnJoin(){
+    if (!hosting) return
+    if (SIG.pc){ busPub(hosting.topic, { k:'full' }); return }
+    try {
+      p2pSay('Подключаю гостя…')
+      const sdp = await hostOffer()
+      busPub(hosting.topic, { k:'offer', sdp, rt: hosting.mode, sl: hosting.limit })
+    } catch(e){ p2pSay('Ошибка: ' + e.message) }
+  }
+  async function hostOnAnswer(sdp){
+    try { await SIG.pc.setRemoteDescription(sdp); p2pSay('Соединяюсь…') }
+    catch(e){ p2pSay('Ответ не подошёл: ' + e.message) }
+  }
+  async function joinRoom(id){
+    p2pReset(); hostStop(); SIG.role = 'guest'
+    SIG.roomTopic = roomTopic(id)
+    p2pSay('Подключаюсь к комнате…')
+    const ok = await busConnect()
+    if (!ok) return manualJoin()
+    busSub([SIG.roomTopic])
+    busPub(SIG.roomTopic, { k:'join' })
+    SIG.joinTimer = setTimeout(()=>{
+      if (!SIG.pc) p2pSay('Комната не отвечает. Попробуй другую.')
+    }, 10000)
+  }
+  async function guestOnOffer(sdp, rt, sl){
+    SIG.rt = rt || 'basic'
+    SIG.sl = Math.max(1, Math.min(500, Number(sl) || 25))
+    clearTimeout(SIG.joinTimer)
+    try {
+      const ans = await guestAnswer(sdp)
+      busPub(SIG.roomTopic, { k:'answer', sdp: ans })
+      p2pSay('Соединяюсь…')
+    } catch(e){ p2pSay('Ошибка: ' + e.message) }
+  }
+
+  busMsg = (topic, d)=>{
+    if (topic === BUS_LOBBY){
+      if (d.k === 'room') lobbyRooms.set(d.id, d)
+      else if (d.k === 'bye') lobbyRooms.delete(d.id)
+      return
+    }
+    if (hosting && topic === hosting.topic){
+      if (d.k === 'join') return void hostOnJoin()
+      if (d.k === 'answer') return void hostOnAnswer(d.sdp)
+      return
+    }
+    if (SIG.role === 'guest' && topic === SIG.roomTopic){
+      if (d.k === 'offer') return void guestOnOffer(d.sdp, d.rt, d.sl)
+      if (d.k === 'full'){ clearTimeout(SIG.joinTimer); p2pSay('В комнате уже двое.') }
+    }
+  }
+  if (p2pRoomsEl) p2pRoomsEl.addEventListener('click', e=>{
+    const btn = e.target.closest('.p2pRoomJoin')
+    if (btn && btn.dataset.room) joinRoom(btn.dataset.room)
+  })
+  busConnect().then(ok=>{
+    if (!ok){ p2pSay('Сервер комнат недоступен — можно ввести код вручную.'); return }
+    busSub([BUS_LOBBY])
+    setInterval(lobbyRender, 1000)
+    lobbyRender()
   })
 
   document.getElementById('p2pCopy').addEventListener('click', async ()=>{
