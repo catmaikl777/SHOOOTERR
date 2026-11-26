@@ -242,8 +242,27 @@
 
   /* ====== MENU ====== */
   #menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
-        justify-content:center;background:#05070d;color:#e6edf3;
-        font-family:monospace;gap:16px;z-index:20;padding:24px;text-align:center;}
+        justify-content:center;background:#05070d;color:#e6edf3;overflow:hidden;
+        font-family:monospace;gap:12px;z-index:20;padding:16px;text-align:center;}
+  #menuHead{display:flex;flex-direction:column;align-items:center;gap:10px;flex:0 0 auto;}
+  #menuScroll{display:flex;flex-direction:column;gap:14px;width:100%;max-width:min(560px,94vw);
+              flex:1 1 auto;min-height:0;
+              overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain;
+              scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;
+              padding:4px 6px 12px;align-items:center;}
+  #menuScroll::-webkit-scrollbar{width:8px;}
+  #menuScroll::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px;}
+  .menuPage{flex:0 0 auto;width:100%;scroll-snap-align:center;display:flex;flex-direction:column;
+            gap:10px;padding:16px;background:#0d1117;border:1px solid #30363d;border-radius:12px;
+            box-sizing:border-box;text-align:center;}
+  .menuPage h2{margin:0;font-size:clamp(14px,2.2vmin,18px);color:#e6edf3;letter-spacing:1px;}
+  .menuPage .pageHint{font-size:12px;color:#8b949e;line-height:1.5;}
+  .menuPage #p2pBox,.menuPage #localBox{width:100%;border:0;background:transparent;padding:0;}
+  #swipeHint{font-size:11px;color:#8b949e;letter-spacing:2px;opacity:.7;}
+  #p2pSettings{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;}
+  #p2pSettings select{padding:10px 8px;border-radius:8px;border:1px solid #30363d;
+                      background:#161b22;color:#e6edf3;font-family:monospace;}
+  #p2pSettings input{width:96px!important;padding:10px 8px!important;font-size:14px!important;}
   #menu h1{margin:0;font-size:clamp(22px,4vmin,32px);letter-spacing:2px;
            color:#fff;text-shadow:0 0 10px #ff2266, 0 0 20px #1133ff;}
   #lastUpdate{font-size:11px;color:#8b949e;margin-top:-10px;letter-spacing:.5px;}
@@ -274,6 +293,17 @@
   .lobbyJoin:disabled{opacity:.4;cursor:not-allowed;}
   #lobbyEmpty{color:#8b949e;font-size:13px;padding:12px;}
   #lobbyStatus{min-height:18px;color:#8b949e;font-size:12px;}
+  #relayBox{display:flex;gap:7px;justify-content:center;align-items:center;}
+  #relayBox input{flex:1;min-width:0;padding:9px 10px;border-radius:8px;border:1px solid #30363d;
+                  background:#161b22;color:#8b949e;font:12px monospace;}
+  #relayBox button{padding:9px 12px;font-size:12px;background:#30363d;box-shadow:none;}
+  #p2pBox{display:flex;width:min(620px,92vw);flex-direction:column;gap:8px;padding:10px;
+          border:1px solid #30363d;border-radius:9px;background:#0d1117;}
+  #p2pBox .p2pTitle{font-size:clamp(13px,2vmin,16px);color:#e6edf3;text-align:center;}
+  #p2pBox .btns{flex-direction:row;justify-content:center;margin-top:0;}
+  #p2pBox button{padding:10px 14px;font-size:13px;box-shadow:none;}
+  #p2pBox textarea{min-height:64px;margin-top:0;font-size:11px;}
+  #p2pStatus{font-size:12px;color:#3fb950;min-height:16px;word-break:break-word;text-align:center;}
   #createLobbyBox{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;align-items:center;}
   #createLobbyBox input{width:145px;}
   #createLobbyBox select{padding:12px 10px;border-radius:8px;border:1px solid #30363d;
@@ -281,6 +311,13 @@
   #privateJoinBox{display:none;gap:7px;justify-content:center;align-items:center;flex-wrap:wrap;}
   #privateJoinBox input{width:145px;}
   #privateJoinBox button{background:#22aa66;box-shadow:0 0 12px #22aa66;}
+  #localBox{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;align-items:center;
+            padding:10px;border:1px solid #30363d;border-radius:9px;background:#0d1117;}
+  #localBox select{padding:12px 10px;border-radius:8px;border:1px solid #30363d;
+                   background:#161b22;color:#e6edf3;font-family:monospace;}
+  #localBox input{width:100px;padding:12px 10px;border-radius:8px;border:1px solid #30363d;
+                  background:#161b22;color:#e6edf3;font-family:monospace;text-align:center;}
+  #localPlayBtn{background:#ff2266;box-shadow:0 0 16px #ff2266;}
   #matchEnd{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
             background:rgba(5,7,13,.94);z-index:30;pointer-events:auto;padding:24px;
             box-sizing:border-box;font-family:monospace;color:#e6edf3;}
@@ -356,46 +393,70 @@
 </div>
 
 <div id="menu">
-  <h1>Shoot'n'cats</h1>
-  <div id="lastUpdate"></div>
-  <input id="nameInput" placeholder="твоё имя" value="" maxlength="14" />
-
-  <div id="lobbyPanel">
-    <div id="lobbyHeader">
-      <strong>🎮 Доступные лобби</strong>
-      <button id="refreshLobbies">↻ ОБНОВИТЬ</button>
-    </div>
-    <div id="lobbyList"><div id="lobbyEmpty">Загрузка лобби…</div></div>
-    <div id="lobbyStatus"></div>
-
-    <div id="createLobbyBox">
-      <input id="newLobbyName" placeholder="название лобби" maxlength="24" />
-      <select id="newLobbyType">
-        <option value="open">🌐 Открытое</option>
-        <option value="private">🔒 Закрытое</option>
-      </select>
-      <input id="newLobbyPassword" placeholder="пароль (для закрытого)" maxlength="32" style="display:none" />
-      <select id="newRoomType">
-        <option value="basic">🗺 Базовая</option>
-        <option value="king_of_hill">👑 Царь горы</option>
-        <option value="delivery">🍲 Доставка корма</option>
-      </select>
-      <input id="newLobbyScoreLimit" type="number" min="1" max="100000" value="100" title="очки для победы" />
-      <button id="createLobbyBtn">СОЗДАТЬ</button>
-    </div>
-
-    <div id="privateJoinBox">
-      <input id="privatePassword" type="password" placeholder="пароль лобби" maxlength="32" />
-      <button id="privateJoinBtn">ВОЙТИ</button>
-    </div>
+  <div id="menuHead">
+    <h1>Shoot'n'cats</h1>
+    <input id="nameInput" placeholder="твоё имя" value="" maxlength="14" />
   </div>
 
-  <div id="hint">
-    Левый стик — движение · Правый стик — прицел и огонь<br>
-    💣 Гранаты: удерживай и отпусти (сила = дальность)<br>
-    ⚡ Рывок · бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💦 распылитель
+  <div id="menuScroll">
+    <section class="menuPage">
+      <h2>🌐 Игра с другом</h2>
+      <div id="p2pBox">
+        <div class="pageHint">Без сервера. Создай бой и пришли другу ссылку.</div>
+        <div id="p2pSettings">
+          <select id="p2pRoomType">
+            <option value="basic">🗺 Базовая</option>
+            <option value="king_of_hill">👑 Царь горы</option>
+            <option value="delivery">🍲 Доставка корма</option>
+          </select>
+          <input id="p2pScoreLimit" type="number" min="1" max="500" value="25" title="очки для победы" />
+        </div>
+        <div class="btns">
+          <button id="p2pCreate">Создать бой</button>
+          <button id="p2pJoinBtn">Войти по коду</button>
+        </div>
+        <div id="p2pStage" style="display:none">
+          <textarea id="p2pOut" readonly placeholder="код/ссылка для друга"></textarea>
+          <div class="btns"><button id="p2pCopy">Скопировать</button></div>
+          <textarea id="p2pIn" placeholder="вставь код от друга"></textarea>
+          <div class="btns"><button id="p2pGo">Подключиться</button></div>
+          <div id="p2pStatus"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="menuPage">
+      <h2>🤖 Локальный бой</h2>
+      <div class="pageHint">Боты на этой машине. Без интернета и настроек.</div>
+      <div id="localBox">
+        <select id="localRoomType">
+          <option value="basic">🗺 Базовая</option>
+          <option value="king_of_hill">👑 Царь горы</option>
+          <option value="delivery">🍲 Доставка корма</option>
+        </select>
+        <select id="localBots">
+          <option value="1">1 бот</option>
+          <option value="2">2 бота</option>
+          <option value="3" selected>3 бота</option>
+          <option value="5">5 ботов</option>
+        </select>
+        <input id="localScoreLimit" type="number" min="1" max="500" value="25" title="очки для победы" />
+        <button id="localPlayBtn">🤖 В БОЙ</button>
+      </div>
+    </section>
+
+    <section class="menuPage">
+      <h2>🎮 Управление</h2>
+      <div id="hint">
+        Левый стик — движение · Правый стик — прицел и огонь<br>
+        💻 WASD — ходьба · мышь — прицел · ЛКМ — огонь<br>
+        Shift — рывок · R — граната (держи ЛКМ для силы)<br>
+        💣 Гранаты: удерживай и отпусти (сила = дальность)<br>
+        ⚡ Бонусы: ❤️ HP · ⚡ скорострел · 🎯 самонаведение · 🏓 рикошет · 🛡 щит · 💦 распылитель
+      </div>
+    </section>
   </div>
-  <div id="pid">…generating identity…</div>
+  <div id="swipeHint">↑ прокрути ↓</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
@@ -474,7 +535,25 @@ const AC_CFG = {
 const APP_ID = 'p2p-shooter-identity-v1'
 const NAME_KEY = 'p2p_name'
 const VOTE_DURATION_MS = 20000
-const RELAY_URL = 'https://real-zoos-try.loca.lt'
+const RELAY_DEFAULT = 'https://real-zoos-try.loca.lt'
+function normalizeRelay(u){
+  let s = String(u || '').trim()
+  if (!s) return RELAY_DEFAULT
+  if (/^wss:\/\//i.test(s) || /^https:\/\//i.test(s)) return s.replace(/^http:\/\//i, 'wss://')
+  if (/^ws:\/\//i.test(s)) return s
+  if (/^http:\/\//i.test(s)) return s.replace(/^http:\/\//i, 'ws://')
+  return 'wss://' + s
+}
+function getRelayUrl(){
+  try {
+    const q = new URLSearchParams(location.search).get('relay')
+    if (q){ localStorage.setItem('p2p_relay', normalizeRelay(q)); return normalizeRelay(q) }
+    const saved = localStorage.getItem('p2p_relay')
+    if (saved) return normalizeRelay(saved)
+  } catch(e){}
+  return normalizeRelay(RELAY_DEFAULT)
+}
+const RELAY_URL = getRelayUrl()
 const GAME_LAST_UPDATE = '2026-09-24T18:02:01+07:00'
 const GAME_COMMITS_URL = 'https://api.github.com/repos/catmaikl777/SHOOOTERR/commits?per_page=1'
 
@@ -1301,6 +1380,8 @@ class GameScene extends Phaser.Scene {
     this.myName = this.registry.get('playerName') || 'anon'
     this.sfx = this.registry.get('sfx')
     this.roomType = this.registry.get('roomType') || 'basic'
+    this.offline = !!this.registry.get('offline')
+    this.botCount = Number(this.registry.get('botCount')) || 3
     this.scoreLimit = Number(this.registry.get('scoreLimit')) || 100
     this.matchData = { over:false, winnerId:null, scoreLimit:this.scoreLimit, started:false }
     this.returningToMenu = false
@@ -1460,7 +1541,6 @@ class GameScene extends Phaser.Scene {
     this.deliveryRoundBEl = document.getElementById('deliveryRoundB')
 
     this._initPregameUI()
-    this._initLastUpdate()
 
     this.actionBtns = document.getElementById('actionBtns')
     this.dashBtn = document.getElementById('dashBtn')
@@ -1475,7 +1555,10 @@ class GameScene extends Phaser.Scene {
     this.peerNames[this.myPeerId] = this.myName
     this.createView(this.myPeerId)
 
-    this.setupNetwork()
+    this.p2pRole = this.registry.get('p2p') || null
+    if (this.p2pRole) this._startP2P()
+    else if (this.offline) this._startOffline()
+    else this.setupNetwork()
 
     this.time.delayedCall(1500, ()=>{
       if (!this.isHost) return
@@ -1829,8 +1912,14 @@ class GameScene extends Phaser.Scene {
     if (this.scoresEl) this.scoresEl.textContent = ''
     if (this.killfeedEl) this.killfeedEl.innerHTML = ''
     if (this.voteInfo) this.voteInfo.textContent = ''
-    const refresh = document.getElementById('refreshLobbies')
-    if (refresh) refresh.click()
+    if (!this.offline){
+      const refresh = document.getElementById('refreshLobbies')
+      if (refresh) refresh.click()
+    }
+    if (this.p2pRole){
+      try { window.__P2P && window.__P2P.dc && window.__P2P.dc.close() } catch(e){}
+      window.__P2P = null
+    }
     try { this.game.destroy(true) } catch {}
   }
 
@@ -1892,6 +1981,9 @@ class GameScene extends Phaser.Scene {
     this.aimVec = { x:1, y:0 }
     this.firing = false
 
+    document.getElementById('joyL').innerHTML = ''
+    document.getElementById('joyR').innerHTML = ''
+
     const joyL = nipplejs.create({
       zone: document.getElementById('joyL'), mode:'static',
       position:{left:'50%',top:'50%'}, color:'#1133ff', size:110, threshold:0.1,
@@ -1926,6 +2018,89 @@ class GameScene extends Phaser.Scene {
         this._doGrenadeThrow()
       }
     })
+
+    this._setupDesktopControls()
+
+    const cleanup = ()=>{
+      try { joyL.destroy() } catch(e){}
+      try { joyR.destroy() } catch(e){}
+      document.getElementById('joyL').innerHTML = ''
+      document.getElementById('joyR').innerHTML = ''
+      for (const [type, fn] of this._deskHandlers || []) window.removeEventListener(type, fn)
+      this._deskHandlers = []
+    }
+    this.sys.events.once('shutdown', cleanup)
+    this.sys.events.once('destroy', cleanup)
+  }
+
+  /* =========== WASD + мышь для компьютера =========== */
+  _setupDesktopControls(){
+    if (!window.matchMedia || !matchMedia('(pointer:fine)').matches) return
+    const keys = new Set()
+    const inJoy = (t) => !!(t && t.closest && (t.closest('#joyL') || t.closest('#joyR')))
+    const alive = () => !!(this.sys && this.sys.isActive && this.sys.isActive())
+    const onKey = (e)=>{
+      if (!alive()) return
+      const k = (e.key || '').toLowerCase()
+      if (k === 'shift') this.tryDash()
+      if (k === 'r' || k === 'к') this.toggleWeapon()
+      if (['w','a','s','d','ц','ф','ы','в','arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault()
+      keys.add(k)
+    }
+    const onKeyUp = e => keys.delete((e.key || '').toLowerCase())
+    const onBlur = ()=>{
+      keys.clear()
+      this.firing = false
+      this.moveVec.x = 0; this.moveVec.y = 0
+    }
+    const onMove = (e)=>{
+      if (!alive() || !this.cameras || !this.cameras.main) return
+      const p = this.cameras.main.getWorldPoint(e.clientX, e.clientY)
+      const dx = p.x - this.local.x, dy = p.y - this.local.y
+      const L = Math.hypot(dx, dy)
+      if (L > 6){
+        this.aimVec.x = dx / L
+        this.aimVec.y = dy / L
+      }
+    }
+    let chargeStart = 0
+    const onDown = (e)=>{
+      if (!alive() || e.button !== 0 || inJoy(e.target) || this.local.dead) return
+      if (this.weapon === 'grenade'){ chargeStart = performance.now(); return }
+      this.firing = true
+    }
+    const onUp = (e)=>{
+      if (!alive() || e.button !== 0 || inJoy(e.target)) return
+      this.firing = false
+      if (this.weapon === 'grenade' && chargeStart){
+        this.aimForce = clamp(0.35 + (performance.now() - chargeStart) / 900, CFG.GRENADE_MIN_FORCE, 1)
+        chargeStart = 0
+        this._doGrenadeThrow()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerdown', onDown)
+    window.addEventListener('pointerup', onUp)
+    this._deskHandlers = [
+      ['keydown', onKey], ['keyup', onKeyUp], ['blur', onBlur],
+      ['pointermove', onMove], ['pointerdown', onDown], ['pointerup', onUp],
+    ]
+    this._deskKeys = keys
+  }
+
+  _applyDeskMove(){
+    const keys = this._deskKeys
+    if (!keys) return
+    let x = (keys.has('d') || keys.has('arrowright') || keys.has('в')) ? 1 : 0
+    x -= (keys.has('a') || keys.has('arrowleft') || keys.has('ф')) ? 1 : 0
+    let y = (keys.has('s') || keys.has('arrowdown') || keys.has('ы')) ? 1 : 0
+    y -= (keys.has('w') || keys.has('arrowup') || keys.has('ц')) ? 1 : 0
+    const L = Math.hypot(x, y)
+    this.moveVec.x = L ? x / L : 0
+    this.moveVec.y = L ? y / L : 0
   }
 
   /* 🆕 выполнить бросок гранаты (на отпускании стика) */
@@ -1990,6 +2165,11 @@ class GameScene extends Phaser.Scene {
      NETWORK
      ============================================================ */
   setupNetwork(){
+    this._initHandlers()
+    this.connectToRelay()
+  }
+
+  _initHandlers(){
     this.handlers = {
       in:   (d, id) => this.onNetInput(d, id),
       st:   (d, id) => this.onNetState(d, id),
@@ -2006,7 +2186,6 @@ class GameScene extends Phaser.Scene {
       deliver: (d, id) => this.onNetDeliver(d, id),
       start: (d, id) => this.onNetStart(d, id),
     }
-    this.connectToRelay()
   }
 
   connectToRelay(){
@@ -2021,6 +2200,21 @@ class GameScene extends Phaser.Scene {
     this.ws.onmessage = ev => {
       let msg
       try { msg = JSON.parse(ev.data) } catch { return }
+      this._onRelayMessage(msg)
+    }
+
+    this.ws.onerror = err => DBG.err('NET', 'ws err', err)
+    this.ws.onclose = ev => {
+      if (this.returningToMenu) return
+      if (this.reconnectAttempts < 30){
+        this.reconnectAttempts++
+        const delay = Math.min(2000 * this.reconnectAttempts, 10000)
+        setTimeout(() => this.connectToRelay(), delay)
+      }
+    }
+  }
+
+  _onRelayMessage(msg){
       const { type } = msg
 
       if (type === 'banned'){
@@ -2031,6 +2225,8 @@ class GameScene extends Phaser.Scene {
       if (type === 'error') return
 
       if (type === 'welcome'){
+        this.p2pWelcome = true
+        if (this._joinTimer){ clearInterval(this._joinTimer); this._joinTimer = null }
         this.serverHostId = 'server'
         this.migrateMyId(msg.peerId)
         this.isHost = false
@@ -2040,6 +2236,7 @@ class GameScene extends Phaser.Scene {
         this.matchData = { ...this.matchData, scoreLimit:this.scoreLimit, started: !!(msg.lobby && msg.lobby.started) }
         this.registry.set('roomType', this.roomType)
         if (this.matchData.started) this.hidePregame()
+        else this.showPregame()
         if (this.myPeerId) this.sendServer('ready', { color:this.myColor, team:this.myTeam, ready:false })
         for (const peerId of (msg.peers || [])){
           if (peerId === this.myPeerId) continue
@@ -2082,19 +2279,14 @@ class GameScene extends Phaser.Scene {
         return
       }
 
+      if (type === 'p2p-end'){
+        this.matchData = { ...this.matchData, over:true, winnerId:msg.winnerId }
+        this.showMatchEnd()
+        return
+      }
+
       const h = this.handlers[msg.a]
       if (h) h(msg.d, msg.from)
-    }
-
-    this.ws.onerror = err => DBG.err('NET', 'ws err', err)
-    this.ws.onclose = ev => {
-      if (this.returningToMenu) return
-      if (this.reconnectAttempts < 30){
-        this.reconnectAttempts++
-        const delay = Math.min(2000 * this.reconnectAttempts, 10000)
-        setTimeout(() => this.connectToRelay(), delay)
-      }
-    }
   }
 
   migrateMyId(newId){
@@ -2561,7 +2753,7 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
   updateStatus(){
     if (!this.statusEl) return
     const n = this.peers.size + (this.myPeerId ? 1 : 0)
-    const role = this.isHost ? 'HOST' : (this.hasBecomeClient ? 'CLIENT' : 'WAIT')
+    const role = this.offline ? 'ЛОКАЛКА' : (this.isHost ? 'HOST' : (this.hasBecomeClient ? 'CLIENT' : 'WAIT'))
     const hp = Math.max(0, Math.round(this.local.hp))
     const sc = this.local.score || 0
     const myName = this.peerNames[this.myPeerId] || this.myName || '?'
@@ -2578,7 +2770,8 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
       hillStatus = this.hillData.contested ? ' · зона: спор' : (this.hillData.owner === this.myPeerId ? ' · 👑 вы на горе' : '')
     }
     const matchStatus = this.matchData.over ? ' · бой окончен' : ''
-    this.statusEl.textContent = `${role} · ${myName} · ${this.roomId} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc}/${this.scoreLimit}${hillStatus}${matchStatus} · ping: ${ping}ms`
+    const pingTxt = this.offline ? 'боты' : (ping + 'ms')
+    this.statusEl.textContent = `${role} · ${myName} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc}/${this.scoreLimit}${hillStatus}${matchStatus} · ${pingTxt}`
   }
 
   renderBonuses(){
@@ -2985,6 +3178,7 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
   update(time, delta){
     const dt = Math.min(delta, 50) / 1000
 
+    if (this._deskKeys) this._applyDeskMove()
     this.updateHillZone(time)
 
     if (time - this.lastAcTick > 250){
@@ -2994,7 +3188,9 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
     }
     if (this.voteActive) this.checkVoteResult()
 
-    if (!this.local.dead){
+    if (this.offline || this.p2pRole === 'host'){
+      this._hostTick(time, dt)
+    } else if (!this.local.dead){
       const now = performance.now()
       let speed = CFG.SPEED
       let mx = this.moveVec.x, my = this.moveVec.y
@@ -3065,6 +3261,383 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
     }
   }
 
+  /* ============================================================
+     ЛОКАЛЬНЫЙ БОЙ: хост-симуляция + боты
+     ============================================================ */
+  _startOffline(){
+    this.isHost = true
+    this.hasBecomeClient = true
+    this.serverHostId = this.myPeerId
+    this.matchData = { ...this.matchData, started:true, over:false, winnerId:null }
+    this._offlineEnded = false
+    AC_CFG.FOG_ENABLED = false
+    const acEl = document.getElementById('ac')
+    if (acEl) acEl.style.display = 'none'
+    this.deliveryBarEl.style.display = (this.roomType === 'delivery') ? '' : 'none'
+    this.pregameEl.style.display = 'none'
+    if (this.voteBtn) this.voteBtn.style.display = 'none'
+    if (this.voteInfo) this.voteInfo.textContent = ''
+    this.becomeHost()
+    this.bots = []
+    const names = ['Барсик','Мурзик','Мурка','Пушок','Васька','Снежок','Рыжик','Шпрот']
+    for (let i = 0; i < this.botCount; i++){
+      const id = 'bot' + (i + 1)
+      this.peers.add(id)
+      this.peerNames[id] = names[i % names.length]
+      this.peerColors[id] = (i + 1) % PLAYER_COLORS.length
+      this.createView(id)
+      this._applyViewColor(id)
+      this.addPlayerToWorld(id)
+      this.ac.ensure(id)
+      this.bots.push({
+        id,
+        inp: { m:[0,0], a:[1,0], f:0, seq:0, dseq:0, tseq:0, w:0, af:0.6, _t:0 },
+        aim: 0, strafe: Math.random() < 0.5 ? 1 : -1,
+        decideAt: 0, nextDash: 2500 + Math.random() * 4000,
+        nextGrenade: 9000 + Math.random() * 12000, reactionAt: 0,
+      })
+    }
+    this.addKillfeedEntry('🤖 Локальный бой · ботов: ' + this.botCount)
+    this.updateStatus()
+  }
+
+  /* ============================================================
+     P2P: хост-браузер считает бой, гость играет через WebRTC
+     ============================================================ */
+  _startP2P(){
+    this._initHandlers()
+    const acEl = document.getElementById('ac')
+    if (acEl) acEl.style.display = 'none'
+    if (this.voteBtn) this.voteBtn.style.display = 'none'
+    const link = window.__P2P || {}
+    const dc = link.dc
+    if (!dc || dc.readyState === 'closed'){
+      document.getElementById('status').textContent = 'P2P: канал не открыт'
+      return
+    }
+    this.bots = []
+    this.p2pReady = {}
+    if (this.p2pRole === 'host'){
+      this.isHost = true
+      this.hasBecomeClient = true
+      this.serverHostId = this.myPeerId
+      this.matchData = { ...this.matchData, started:false, over:false }
+      this.p2pGuest = null
+      this.p2pReady[this.myPeerId] = false
+      this.becomeHost()
+      this.showPregame()
+      this._installHostSocket(dc)
+    } else {
+      this.isHost = false
+      this.hasBecomeClient = true
+      this.showPregame()
+      this._installGuestSocket(dc)
+    }
+    this.updateStatus()
+  }
+
+  _installGuestSocket(dc){
+    const self = this
+    this.ws = {
+      readyState: 1, bufferedAmount: 0,
+      send(s){
+        let m; try { m = JSON.parse(s) } catch { return }
+        if (m.type){ try { dc.send(s) } catch(e){} ; return }
+        if (!m.data) return
+        try { dc.send(JSON.stringify({ a:m.data.a, d:m.data.d, from: self.myPeerId })) } catch(e){}
+      },
+      close(){ try { dc.close() } catch(e){} },
+    }
+    dc.onmessage = ev => {
+      let m; try { m = JSON.parse(ev.data) } catch { return }
+      self._onRelayMessage(m)
+    }
+    dc.onclose = () => {
+      if (self.returningToMenu) return
+      self.addKillfeedEntry('Хост отключился')
+    }
+    const joinMsg = JSON.stringify({ type:'join', room:this.roomId, password:'', roomType:this.roomType })
+    let tries = 0
+    const ping = () => {
+      if (this.p2pWelcome || tries++ > 40) return
+      try { dc.send(joinMsg) } catch(e){}
+    }
+    ping()
+    this._joinTimer = setInterval(ping, 500)
+  }
+
+  _installHostSocket(dc){
+    const self = this
+    this.ws = {
+      readyState: 1, bufferedAmount: 0,
+      send(s){
+        let m; try { m = JSON.parse(s) } catch { return }
+        if (m.to && self.p2pGuest && m.to !== self.p2pGuest) return
+        if (m.type){ try { dc.send(s) } catch(e){} ; return }
+        if (!m.data) return
+        const flat = { a:m.data.a, d:m.data.d, from:self.myPeerId }
+        if (!m.to) self._p2pLocal(flat)
+        try { if (dc.readyState === 'open') dc.send(JSON.stringify(flat)) } catch(e){}
+      },
+      close(){ try { dc.close() } catch(e){} },
+    }
+    dc.onmessage = ev => {
+      let m; try { m = JSON.parse(ev.data) } catch { return }
+      self._p2pFromGuest(m)
+    }
+    dc.onclose = () => {
+      if (self.p2pGuest) self.addKillfeedEntry('Гость отключился')
+      self.p2pGuest = null
+      self.updateStatus()
+    }
+  }
+
+  _p2pLocal(d){
+    if (d.a === 'ready') this._p2pReadyFrom(this.myPeerId, d.d)
+  }
+
+  _p2pFromGuest(m){
+    if (!this.p2pGuest){
+      if (m.type === 'join') this._p2pAcceptGuest()
+      return
+    }
+    if (m.type) return
+    const a = m.a || (m.data && m.data.a)
+    const d = m.d !== undefined ? m.d : (m.data && m.data.d)
+    if (!a) return
+    if (a === 'ready') return this._p2pReadyFrom(this.p2pGuest, d)
+    if (a === 'id') return this.onNetIdentity(d, this.p2pGuest)
+    if (a === 'png') return this.onNetPing(d, this.p2pGuest)
+    const h = this.handlers[a]
+    if (h) h(d, this.p2pGuest)
+  }
+
+  _p2pAcceptGuest(){
+    const id = 'guest_' + randomToken(3)
+    this.p2pGuest = id
+    this.p2pReady[id] = false
+    this.peers.add(id)
+    this.peerNames[id] = 'гость'
+    this.peerColors[id] = 1
+    this.createView(id)
+    this.addPlayerToWorld(id)
+    this.ac.ensure(id)
+    if (this.ws) this.ws.send(JSON.stringify({
+      type:'welcome', peerId:id, peers:[this.myPeerId],
+      roomType:this.roomType, lobby:{ scoreLimit:this.scoreLimit, started:this.matchData.started },
+    }))
+    this.updateStatus()
+  }
+
+  _p2pReadyFrom(id, d){
+    if (d && d.ready) this.p2pReady[id] = true
+    const hostReady = !!this.p2pReady[this.myPeerId]
+    const guestReady = this.p2pGuest ? !!this.p2pReady[this.p2pGuest] : false
+    if (hostReady && guestReady && !this.matchData.started){
+      this.matchData = { ...this.matchData, started:true }
+      this.hidePregame()
+      this.ws.send(JSON.stringify({ data:{ a:'start', d:{ started:true } } }))
+      this.addKillfeedEntry('Бой начался')
+    }
+  }
+
+  _hostTick(time, dt){
+    if (!this.matchData.started) return
+    const now = performance.now()
+    this.inputs[this.myPeerId] = {
+      seq: ++this.ac.seq,
+      m: [this.moveVec.x, this.moveVec.y],
+      a: [this.aimVec.x, this.aimVec.y],
+      f: (this.weapon === 'rifle' && this.firing) ? 1 : 0,
+      d: this.local.dead ? 1 : 0,
+      dseq: this.dashSeq,
+      w: this.weapon === 'grenade' ? 1 : 0,
+      af: this.aimForce,
+      tseq: this.throwSeq,
+      _t: now,
+    }
+    for (const bot of this.bots || []) this._botThink(bot, time, now, dt)
+    this.simulateHost(time, dt)
+
+    const me = this.worldPlayers[this.myPeerId]
+    if (me){
+      this.predicted.x = me.x; this.predicted.y = me.y
+      this.local.x = me.x; this.local.y = me.y
+      this.local.hp = me.hp; this.local.dead = me.dead
+    }
+    this._offlineObjectives(dt)
+    this._offlineScoreCheck()
+  }
+
+  _offlineObjectives(dt){
+    if (this.roomType === 'king_of_hill'){
+      this._hillT = (this._hillT || 0) + dt
+      if (this._hillT >= 1){
+        this._hillT -= 1
+        const inside = []
+        for (const id in this.worldPlayers){
+          const p = this.worldPlayers[id]
+          if (p.dead) continue
+          if (Math.hypot(p.x - KING_OF_HILL.x, p.y - KING_OF_HILL.y) < KING_OF_HILL.r) inside.push(id)
+        }
+        this.hillData.contested = inside.length > 1
+        this.hillData.owner = inside.length === 1 ? inside[0] : null
+        if (inside.length === 1) this.worldPlayers[inside[0]].score += 1
+      }
+    } else if (this.roomType === 'delivery'){
+      if (!this.cartData) this.cartData = { x: CART_START.x, y: CART_START.y, rounds:[0, 0], holder:null }
+      const cart = this.cartData
+      if (!cart.holder){
+        for (const id in this.worldPlayers){
+          const p = this.worldPlayers[id]
+          if (p.dead) continue
+          if (Math.hypot(p.x - cart.x, p.y - cart.y) < 40){ cart.holder = id; break }
+        }
+      } else {
+        const h = this.worldPlayers[cart.holder]
+        if (!h || h.dead){
+          cart.holder = null
+          cart.x = CART_START.x; cart.y = CART_START.y
+        } else {
+          cart.x = h.x; cart.y = h.y
+          if (Math.hypot(h.x - CART_END.x, h.y - CART_END.y) < 64){
+            cart.rounds[0]++
+            h.score += 1
+            cart.holder = null
+            cart.x = CART_START.x; cart.y = CART_START.y
+            this.sfx.deliver(0, 1)
+            this._updateDeliveryRounds(cart.rounds)
+            this.addKillfeedEntry('🍲 Корм доставлен! +1')
+          }
+        }
+      }
+      this._updateCartVisual(cart)
+    }
+  }
+
+  _botThink(bot, time, now, dt){
+    const p = this.worldPlayers[bot.id]
+    const inp = bot.inp
+    if (!p) return
+    this.inputs[bot.id] = inp
+    inp._t = now
+    inp.seq++
+    inp.d = p.dead ? 1 : 0
+    inp.w = 0
+    inp.f = 0
+    if (p.dead) { inp.m = [0,0]; return }
+
+    /* ближайший живой соперник + есть ли прямая видимость */
+    let target = null, best = 1e9, los = false
+    for (const id in this.worldPlayers){
+      if (id === bot.id) continue
+      const q = this.worldPlayers[id]
+      if (!q || q.dead) continue
+      const d = Math.hypot(q.x - p.x, q.y - p.y)
+      if (d < best){
+        best = d; target = q
+        los = lineOfSight(p.x, p.y, q.x, q.y, this.wallRects)
+      }
+    }
+
+    /* режимные точки */
+    let goal = null
+    if (this.roomType === 'king_of_hill'){
+      const inHill = Math.hypot(p.x - KING_OF_HILL.x, p.y - KING_OF_HILL.y) < KING_OF_HILL.r * 0.8
+      if (!inHill && (!los || best > 400)) goal = { x: KING_OF_HILL.x, y: KING_OF_HILL.y }
+    } else if (this.roomType === 'delivery' && this.cartData){
+      if (!los || best > 520) goal = { x: this.cartData.x, y: this.cartData.y }
+    }
+
+    let ang = bot.aim
+    let mx = 0, my = 0
+
+    if (target){
+      const ta = Math.atan2(target.y - p.y, target.x - p.x)
+      if (goal){
+        const ga = Math.atan2(goal.y - p.y, goal.x - p.x)
+        mx = Math.cos(ga); my = Math.sin(ga)
+        ang = ga
+      } else if (best > 300 || !los) {
+        mx = Math.cos(ta); my = Math.sin(ta)
+        ang = ta
+      } else if (best < 150) {
+        mx = -Math.cos(ta); my = -Math.sin(ta)
+        ang = ta
+      } else {
+        if (time > bot.decideAt){ bot.decideAt = time + 900 + Math.random() * 1400; bot.strafe *= -1 }
+        mx = Math.cos(ta + Math.PI/2) * bot.strafe
+        my = Math.sin(ta + Math.PI/2) * bot.strafe
+        ang = ta
+      }
+      if (los && !goal && best < 700){
+        const err = Math.abs(((ta - bot.aim + Math.PI * 3) % (Math.PI * 2)) - Math.PI)
+        if (err < 0.2) inp.f = 1
+      }
+    } else if (goal){
+      ang = Math.atan2(goal.y - p.y, goal.x - p.x)
+      mx = Math.cos(ang); my = Math.sin(ang)
+    } else {
+      /* патруль, если никого нет */
+      if (time > bot.decideAt){ bot.decideAt = time + 1200; bot.aim = Math.random() * Math.PI * 2 }
+      mx = Math.cos(bot.aim) * 0.7; my = Math.sin(bot.aim) * 0.7
+    }
+
+    /* объезд стен: пробуем повернуть вектор движения */
+    if (mx || my){
+      const probe = (a) => !this.isInsideWall(p.x + Math.cos(a) * 44, p.y + Math.sin(a) * 44, CFG.PLAYER_R)
+      const base = Math.atan2(my, mx)
+      if (!probe(base)){
+        let found = null
+        for (const off of [0.7, -0.7, 1.3, -1.3, 2.0, -2.0]){
+          if (probe(base + off)){ found = base + off; break }
+        }
+        if (found === null){ mx = 0; my = 0 }
+        else { mx = Math.cos(found); my = Math.sin(found) }
+      }
+    }
+
+    /* сглаживание прицела с человеческой ошибкой */
+    let da = ang - bot.aim
+    while (da > Math.PI) da -= Math.PI * 2
+    while (da < -Math.PI) da += Math.PI * 2
+    bot.aim += da * Math.min(1, dt * 6)
+    const jitter = (Math.random() - 0.5) * 0.06
+    inp.a = [Math.cos(bot.aim + jitter), Math.sin(bot.aim + jitter)]
+    inp.m = [mx, my]
+
+    /* рывок и граната изредка */
+    if (time > bot.nextDash && target){
+      bot.nextDash = time + 4000 + Math.random() * 6000
+      inp.dseq = (inp.dseq || 0) + 1
+    }
+    if (time > bot.nextGrenade && target && los && best > 300 && best < 620){
+      bot.nextGrenade = time + 12000 + Math.random() * 12000
+      inp.tseq = (inp.tseq || 0) + 1
+      inp.af = 0.65 + Math.random() * 0.35
+    }
+  }
+
+  _offlineScoreCheck(){
+    if (this._offlineEnded) return
+    let bestId = null, best = -1
+    for (const id in this.worldPlayers){
+      const s = this.worldPlayers[id].score || 0
+      if (s > best){ best = s; bestId = id }
+    }
+    if (best >= this.scoreLimit){
+      this._offlineEnded = true
+      this.matchData = { ...this.matchData, over:true, winnerId:bestId }
+      for (const id in this.worldPlayers){
+        this.scores[id] = Math.round(this.worldPlayers[id].score || 0)
+      }
+      if (this.p2pRole === 'host' && this.ws){
+        try { this.ws.send(JSON.stringify({ type:'p2p-end', winnerId: bestId })) } catch(e){}
+      }
+      this.showMatchEnd()
+    }
+  }
+
   spawnLocalGrenade(ax, ay, force){
     const id = 'local_' + this.myPeerId + '_g' + (++this.bulletSeq)
     const speed = CFG.GRENADE_SPEED * (force || 1)
@@ -3115,6 +3688,7 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
 
   simulateHost(time, dt){
     const now = performance.now()
+    this.rebuildPlayerGrid()
 
     for (const id in this.worldPlayers){
       const p = this.worldPlayers[id]
@@ -3873,11 +4447,6 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
     }
   }
 
-  try {
-    document.getElementById('pid').textContent =
-      `identity: ${identity.mode} · id: ${identity.pubHash}`
-  } catch(e){}
-
   DBG.log('BOOT', 'identity ready:', identity.mode)
 
   const sfx = new SoundEngine()
@@ -3973,7 +4542,7 @@ const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
       }
       lobbyStatus('Активных лобби: ' + list.length)
     } catch(e){
-      lobbyStatus('Не удалось получить список лобби: ' + (e.message || e), true)
+      lobbyStatus('Сервер лобби недоступен — жми «🤖 ЛОКАЛЬНЫЙ БОЙ»', true)
       document.getElementById('lobbyList').innerHTML =
         '<div id="lobbyEmpty">Сервер лобби недоступен.</div>'
     }
@@ -4025,13 +4594,14 @@ const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
     startGame(selectedPrivateLobby.id, password, selectedPrivateLobby.name || selectedPrivateLobby.id, selectedPrivateLobby.type || 'basic', selectedPrivateLobby.scoreLimit || 100)
   }
 
-  function startGame(roomId, roomPassword='', lobbyName='', roomType='basic', scoreLimit=100){
+  function startGame(roomId, roomPassword='', lobbyName='', roomType='basic', scoreLimit=100, offline=false, botCount=3, p2p=null){
     const rawName = document.getElementById('nameInput').value || ''
     const name = cleanName(rawName) || ('Player' + Math.floor(Math.random()*999))
     DBG.log('BOOT', 'starting lobby:', roomId, 'name:', name, 'lobby:', lobbyName)
     closeLobbySocket()
     document.getElementById('menu').style.display = 'none'
-    document.getElementById('privateJoinBox').style.display = 'none'
+    const _pj = document.getElementById('privateJoinBox')
+    if (_pj) _pj.style.display = 'none'
     document.getElementById('gameWrap').style.display = 'block'
     document.getElementById('ui').style.display = 'block'
     document.getElementById('matchEnd').style.display = 'none'
@@ -4041,7 +4611,22 @@ const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
       sfx.startAmbient()
     } catch(e){}
 
-    new Phaser.Game({
+    const applyRegistry = (g)=>{
+      g.registry.set('roomId', roomId)
+      g.registry.set('roomPassword', roomPassword)
+      g.registry.set('identity', identity)
+      g.registry.set('playerName', name)
+      g.registry.set('sfx', sfx)
+      g.registry.set('lobbyName', lobbyName)
+      g.registry.set('roomType', roomType)
+      g.registry.set('scoreLimit', scoreLimit)
+      g.registry.set('offline', !!offline)
+      g.registry.set('botCount', botCount)
+      g.registry.set('p2p', p2p)
+    }
+
+    try { if (window.game) window.game.destroy(true) } catch(e){}
+    window.game = new Phaser.Game({
       type: Phaser.AUTO,
       parent: 'game',
       backgroundColor: '#05070d',
@@ -4059,30 +4644,142 @@ const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
           game.registry.set('lobbyName', lobbyName)
           game.registry.set('roomType', roomType)
           game.registry.set('scoreLimit', scoreLimit)
+          game.registry.set('offline', !!offline)
+          game.registry.set('botCount', botCount)
+          game.registry.set('p2p', p2p)
         }
       },
     })
   }
 
-  document.getElementById('refreshLobbies').addEventListener('click', refreshLobbies)
-  document.getElementById('createLobbyBtn').addEventListener('click', createLobby)
-  document.getElementById('privateJoinBtn').addEventListener('click', joinPrivateLobby)
+  /* ===== P2P без сервера: WebRTC + обмен кодом ===== */
+  const p2pStage = document.getElementById('p2pStage')
+  const p2pOut = document.getElementById('p2pOut')
+  const p2pIn = document.getElementById('p2pIn')
+  const p2pGo = document.getElementById('p2pGo')
+  const p2pStatusEl = document.getElementById('p2pStatus')
+  const SIG = { pc:null, dc:null, role:null, started:false }
+  const p2pSay = t => { p2pStatusEl.textContent = t }
+  const p2pReset = ()=>{
+    try { SIG.dc && SIG.dc.close() } catch(e){}
+    try { SIG.pc && SIG.pc.close() } catch(e){}
+    SIG.pc = null; SIG.dc = null; SIG.started = false
+  }
+  const iceDone = pc => new Promise(res=>{
+    if (pc.iceGatheringState === 'complete') return res()
+    const t = setTimeout(res, 4000)
+    pc.addEventListener('icegatheringstatechange', ()=>{
+      if (pc.iceGatheringState === 'complete'){ clearTimeout(t); res() }
+    })
+  })
+  const encSig = o => btoa(JSON.stringify(o))
+  const decSig = s => JSON.parse(atob(String(s).trim()))
+  const gameLink = code => location.href.split('#')[0].split('?')[0] + '?p2p=' + encodeURIComponent(code)
+  const p2pLaunch = role => {
+    const rt = SIG.rt || 'basic'
+    const sl = Math.max(1, Math.min(500, Number(SIG.sl) || 25))
+    window.__P2P = { dc: SIG.dc, role }
+    setTimeout(() => startGame('p2p', '', 'P2P', rt, sl, false, 0, role), 80)
+  }
+
+  document.getElementById('p2pCreate').addEventListener('click', async ()=>{
+    p2pReset()
+    SIG.role = 'host'
+    p2pStage.style.display = ''
+    p2pIn.style.display = ''
+    p2pGo.style.display = ''
+    p2pIn.value = ''
+    p2pOut.value = ''
+    p2pSay('Готовлю приглашение…')
+    try {
+      const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] })
+      SIG.pc = pc
+      const dc = pc.createDataChannel('game', { ordered:false, maxRetransmits:0 })
+      SIG.dc = dc
+      dc.onopen = ()=>{ if (!SIG.started){ SIG.started = true; p2pLaunch('host') } }
+      await pc.setLocalDescription(await pc.createOffer())
+      await iceDone(pc)
+      SIG.rt = document.getElementById('p2pRoomType').value || 'basic'
+      SIG.sl = Math.max(1, Math.min(500, Number(document.getElementById('p2pScoreLimit').value) || 25))
+      p2pOut.value = gameLink(encSig({ t:'offer', sdp:pc.localDescription, rt:SIG.rt, sl:SIG.sl }))
+      p2pSay('Отправь другу ссылку выше. Его ответ вставь ниже и нажми «Подключиться».')
+    } catch(e){ p2pSay('Ошибка: ' + e.message) }
+  })
+
+  document.getElementById('p2pJoinBtn').addEventListener('click', ()=>{
+    p2pReset()
+    SIG.role = 'guest'
+    p2pStage.style.display = ''
+    p2pOut.value = ''
+    p2pIn.value = ''
+    p2pIn.style.display = ''
+    p2pGo.style.display = ''
+    p2pSay('Вставь код-приглашение от хоста и нажми «Подключиться».')
+  })
+
+  async function p2pAccept(code){
+    p2pStage.style.display = ''
+    SIG.role = 'guest'
+    p2pSay('Готовлю ответ…')
+    let offer
+    try { offer = decSig(code) } catch(e){ p2pSay('Код повреждён'); return }
+    SIG.rt = offer.rt || 'basic'
+    SIG.sl = Math.max(1, Math.min(500, Number(offer.sl) || 25))
+    try {
+      const pc = new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] })
+      SIG.pc = pc
+      pc.ondatachannel = e => {
+        SIG.dc = e.channel
+        SIG.dc.onopen = ()=>{ if (!SIG.started){ SIG.started = true; p2pLaunch('guest') } }
+      }
+      await pc.setRemoteDescription(offer.sdp || offer)
+      await pc.setLocalDescription(await pc.createAnswer())
+      await iceDone(pc)
+      p2pOut.value = encSig({ t:'answer', sdp:pc.localDescription })
+      p2pIn.style.display = 'none'
+      p2pGo.style.display = 'none'
+      p2pSay('Отправь этот код хосту. Бой начнётся, когда он его вставит.')
+    } catch(e){ p2pSay('Ошибка: ' + e.message) }
+  }
+
+  p2pGo.addEventListener('click', async ()=>{
+    const v = p2pIn.value.trim()
+    if (!v){ p2pSay('Поле пустое'); return }
+    if (SIG.role === 'host'){
+      try {
+        const ans = decSig(v)
+        await SIG.pc.setRemoteDescription(ans.sdp || ans)
+        p2pSay('Соединяюсь…')
+        p2pIn.style.display = 'none'
+        p2pGo.style.display = 'none'
+      } catch(e){ p2pSay('Неверный ответ: ' + e.message) }
+    } else {
+      await p2pAccept(v)
+    }
+  })
+
+  document.getElementById('p2pCopy').addEventListener('click', async ()=>{
+    try { await navigator.clipboard.writeText(p2pOut.value); p2pSay('Скопировано') }
+    catch(e){ p2pOut.select(); document.execCommand('copy'); p2pSay('Скопировано') }
+  })
+
+  const p2pParam = new URLSearchParams(location.search).get('p2p')
+  if (p2pParam) p2pAccept(p2pParam)
+
+  document.getElementById('localPlayBtn').addEventListener('click', ()=>{
+    const type = document.getElementById('localRoomType').value || 'basic'
+    const bots = Math.max(1, Math.min(5, Number(document.getElementById('localBots').value) || 3))
+    const limit = Math.max(1, Math.min(500, Number(document.getElementById('localScoreLimit').value) || 25))
+    startGame('local_arena', '', 'ЛОКАЛЬНЫЙ БОЙ', type, limit, true, bots)
+  })
   const nameInputEl = document.getElementById('nameInput')
   const savedName = localStorage.getItem(NAME_KEY)
   if (savedName && nameInputEl) nameInputEl.value = cleanName(savedName) || ''
   if (nameInputEl) nameInputEl.addEventListener('input', ()=>{
     localStorage.setItem(NAME_KEY, nameInputEl.value || '')
   })
-  document.getElementById('newLobbyType').addEventListener('change', ()=>{
-    document.getElementById('newLobbyPassword').style.display =
-      document.getElementById('newLobbyType').value === 'private' ? 'block' : 'none'
-  })
-  document.getElementById('privatePassword').addEventListener('keydown', e=>{
-    if (e.key === 'Enter') joinPrivateLobby()
-  })
 
-  refreshLobbies()
-  DBG.log('BOOT', 'lobby browser ready')
+  DBG.log('BOOT', 'menu ready')
 })()
 </script>
 </body>
