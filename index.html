@@ -2442,7 +2442,8 @@ class GameScene extends Phaser.Scene {
     const p = this.ac.ensure(fromId)
     if (data.pong){
       p.rtt = performance.now() - data.t
-      this._rttMs = p.rtt
+      /* сглаживаем: одиночный выброс до 700 мс не должен раздувать буфер */
+      this._rttMs = this._rttMs ? this._rttMs * 0.75 + p.rtt * 0.25 : p.rtt
       p.lastUpdate = performance.now()
     }
   }
@@ -2794,7 +2795,8 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
     }
     const matchStatus = this.matchData.over ? ' · бой окончен' : ''
     const pingTxt = this.offline ? 'боты' : (ping + 'ms')
-    this.statusEl.textContent = `${role} · ${myName} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc}/${this.scoreLimit}${hillStatus}${matchStatus} · ${pingTxt}`
+    const fpsTxt = Math.round((this.game && this.game.loop && this.game.loop.actualFps) || 0)
+    this.statusEl.textContent = `${role} · ${myName} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc}/${this.scoreLimit}${hillStatus}${matchStatus} · ${pingTxt} · ${fpsTxt}fps`
   }
 
   renderBonuses(){
@@ -4392,8 +4394,16 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
         }
         const span = Math.max(1, b.t - a.t)
         const alpha = Math.min(1, Math.max(0, (renderTime - a.t) / span))
-        v.sprite.x = a.x + (b.x - a.x) * alpha
-        v.sprite.y = a.y + (b.y - a.y) * alpha
+        /* Канал без ретрансмиссий: снапшоты теряются. Если данных нет —
+           ведём игрока по последней скорости, иначе он замирает на 0.5 с. */
+        if (renderTime > b.t && b === v.buffer[v.buffer.length-1]){
+          const extra = Math.min(150, renderTime - b.t)
+          v.sprite.x = b.x + ((b.x - a.x) / span) * extra
+          v.sprite.y = b.y + ((b.y - a.y) / span) * extra
+        } else {
+          v.sprite.x = a.x + (b.x - a.x) * alpha
+          v.sprite.y = a.y + (b.y - a.y) * alpha
+        }
         v.ta = Math.atan2(b.ay, b.ax)
         v.hp = b.hp
         v.dead = b.dead
