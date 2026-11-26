@@ -482,7 +482,7 @@ const CFG = {
   PLAYER_R: 18, SPEED: 240,
   BULLET_SPEED: 780, BULLET_R: 5, BULLET_LIFE: 1.4,
   FIRE_CD: 150, MAX_HP: 100, DAMAGE: 25, RESPAWN: 2500,
-  STATE_MS: 66, INPUT_MS: 50,
+  STATE_MS: 50, INPUT_MS: 33,
 
   PLAYER_W: 56, PLAYER_H: 48,
   BULLET_SIZE: 14,
@@ -2296,6 +2296,11 @@ class GameScene extends Phaser.Scene {
         return
       }
 
+      if (msg.a === 'png' && msg.d && !msg.d.pong){
+        this.ws.send(JSON.stringify({ data:{ a:'png', d:{ t:msg.d.t, pong:1 } } }))
+        return
+      }
+
       const h = this.handlers[msg.a]
       if (h) h(msg.d, msg.from)
   }
@@ -3439,7 +3444,11 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
     if (!a) return
     if (a === 'ready') return this._p2pReadyFrom(this.p2pGuest, d)
     if (a === 'id') return this.onNetIdentity(d, this.p2pGuest)
-    if (a === 'png') return this.onNetPing(d, this.p2pGuest)
+    if (a === 'png'){
+      if (d.pong) this.onNetPing(d, this.p2pGuest)
+      else this.ws.send(JSON.stringify({ data:{ a:'png', d:{ t:d.t, pong:1 } } }))
+      return
+    }
     const h = this.handlers[a]
     if (h) h(d, this.p2pGuest)
   }
@@ -4346,7 +4355,7 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
         if (!v.init){ v.init = true; v.sprite.x = v.tx; v.sprite.y = v.ty }
         else { v.sprite.x = v.tx; v.sprite.y = v.ty }
       } else if (v.buffer && v.buffer.length >= 2){
-        const renderTime = performance.now() - 100
+        const renderTime = performance.now() - 70
         let a = v.buffer[0], b = v.buffer[v.buffer.length-1]
         for (let i = 0; i < v.buffer.length - 1; i++){
           if (v.buffer[i].t <= renderTime && v.buffer[i+1].t > renderTime){
