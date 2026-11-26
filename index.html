@@ -2010,7 +2010,8 @@ class GameScene extends Phaser.Scene {
       zone: document.getElementById('joyR'), mode:'static',
       position:{left:'50%',top:'50%'}, color:'#ff2266', size:110, threshold:0.1,
     })
-    joyR.on('start', ()=>{ this.firing = true })
+    /* огонь идёт всё время, пока стик держат: иначе неподвижный палец даёт firing=false */
+    joyR.on('start', ()=>{ this.firing = true; this._joyForce = 0 })
     joyR.on('move', (e,d)=>{
       const f = Math.min(d.force,1)
       const ax = Math.cos(d.angle.radian), ay = -Math.sin(d.angle.radian)
@@ -2018,11 +2019,12 @@ class GameScene extends Phaser.Scene {
         this.aimVec.x = ax; this.aimVec.y = ay
         this.aimForce = f
       }
-      this.firing = f > 0.25
+      if (f > (this._joyForce || 0)) this._joyForce = f
     })
     /* 🆕 БРОСОК ПО ОТПУСКАНИЮ */
     joyR.on('end', ()=>{
-      const wasFiring = this.firing
+      const wasFiring = (this._joyForce || 0) > 0.25
+      this._joyForce = 0
       this.firing = false
       if (this.grenadePreview) this.grenadePreview.clear()
       if (wasFiring && this.weapon === 'grenade' && !this.local.dead){
