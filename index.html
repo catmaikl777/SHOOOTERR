@@ -2368,7 +2368,7 @@ class GameScene extends Phaser.Scene {
       const now = performance.now()
       let fresh = false
       for (const k in this.ghostBullets){
-        if (k.startsWith(prefix) && now - this.ghostBullets[k].born < 300){ fresh = true; break }
+        if (k.startsWith(prefix) && now - this.ghostBullets[k].born < 600){ fresh = true; break }
       }
       if (fresh) return
     }
@@ -2442,6 +2442,7 @@ class GameScene extends Phaser.Scene {
     const p = this.ac.ensure(fromId)
     if (data.pong){
       p.rtt = performance.now() - data.t
+      this._rttMs = p.rtt
       p.lastUpdate = performance.now()
     }
   }
@@ -2912,12 +2913,16 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
         } else {
           this.localBonuses = [0, 0, 0, 0, 0]
         }
+        /* Хост на 200 мс всегда позади: постоянное вытягивание назад читается как тормоз,
+           поэтому на ходу правим только заметное расхождение. */
         const dx = x - this.predicted.x, dy = y - this.predicted.y
-        if (Math.abs(dx) > 120 || Math.abs(dy) > 120){
+        const err = Math.hypot(dx, dy)
+        if (err > 120){
           this.predicted.x = x; this.predicted.y = y
-        } else {
-          this.predicted.x += dx * 0.15
-          this.predicted.y += dy * 0.15
+        } else if (err > 20){
+          const k = (this.moveVec.x || this.moveVec.y) ? 0.04 : 0.25
+          this.predicted.x += dx * k
+          this.predicted.y += dy * k
         }
       } else {
         let v = this.views[id]
@@ -3284,7 +3289,26 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
       }
     }
 
-    /* Снаряды теперь создаёт авторитетный сервер. */
+    /* Свой выстрел клиент рисует сразу: при 200 мс эхо от хоста приходит слишком поздно */
+    if (!this.isHost && !this.local.dead && this.weapon === 'rifle' && this.firing){
+      const shotAt = performance.now()
+      const bn = this.localBonuses || [0,0,0,0,0]
+      const behavior = this._computeFireBehavior([bn[0], bn[1], bn[2], bn[3], bn[4]], shotAt)
+      if (shotAt - (this._lastLocalShot || 0) > behavior.fireCd){
+        this._lastLocalShot = shotAt
+        this._predSeq = (this._predSeq || 0) + 1
+        const len = Math.hypot(this.aimVec.x, this.aimVec.y) || 1
+        const ax = this.aimVec.x / len, ay = this.aimVec.y / len
+        this.sfx.shoot(behavior.kind, 0, 1)
+        this.spawnGhostBullet({
+          id: 'local_' + this.myPeerId + '-' + this._predSeq,
+          x: this.local.x + ax * (CFG.PLAYER_R + 6), y: this.local.y + ay * (CFG.PLAYER_R + 6),
+          vx: ax * CFG.BULLET_SPEED, vy: ay * CFG.BULLET_SPEED,
+          homing: behavior.opts.homing, ricochet: behavior.opts.ricochet,
+          sprayer: behavior.opts.sprayer, predicted: true,
+        })
+      }
+    }
 
     this.updateGhostBullets(time, dt)
     this.updateGrenadeTrajectory()
@@ -4357,7 +4381,9 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
         if (!v.init){ v.init = true; v.sprite.x = v.tx; v.sprite.y = v.ty }
         else { v.sprite.x = v.tx; v.sprite.y = v.ty }
       } else if (v.buffer && v.buffer.length >= 2){
-        const renderTime = performance.now() - 70
+        /* буфер шире при большом пинге: иначе редкие снапшоты дают рывки */
+        const interp = Math.min(180, 70 + (this._rttMs || 0) * 0.35)
+        const renderTime = performance.now() - interp
         let a = v.buffer[0], b = v.buffer[v.buffer.length-1]
         for (let i = 0; i < v.buffer.length - 1; i++){
           if (v.buffer[i].t <= renderTime && v.buffer[i+1].t > renderTime){
