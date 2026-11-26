@@ -421,6 +421,9 @@
           </select>
           <input id="p2pScoreLimit" type="number" min="1" max="500" value="25" title="очки для победы" />
         </div>
+        <label style="display:flex;gap:6px;align-items:center;justify-content:center;font:11px monospace;color:#8b949e;margin:6px 0">
+          <input id="p2pRelay" type="checkbox" /> только через релей (если лагает)
+        </label>
         <div class="btns">
           <button id="p2pCreate">Создать бой</button>
           <button id="p2pJoinBtn">Код вручную</button>
@@ -2796,7 +2799,8 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
     const matchStatus = this.matchData.over ? ' · бой окончен' : ''
     const pingTxt = this.offline ? 'боты' : (ping + 'ms')
     const fpsTxt = Math.round((this.game && this.game.loop && this.game.loop.actualFps) || 0)
-    this.statusEl.textContent = `${role} · ${myName} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc}/${this.scoreLimit}${hillStatus}${matchStatus} · ${pingTxt} · ${fpsTxt}fps`
+    const pathTxt = P2P_PATH ? ' · ' + P2P_PATH : ''
+    this.statusEl.textContent = `${role} · ${myName} · ${typeIcon} игроков: ${n} · HP: ${hp} · очки: ${sc}/${this.scoreLimit}${hillStatus}${matchStatus} · ${pingTxt} · ${fpsTxt}fps${pathTxt}`
   }
 
   renderBonuses(){
@@ -4815,24 +4819,43 @@ const typeEmoji = {basic:'🗺', delivery:'🍲', king_of_hill:'👑'}
   })
 
   /* --- общий WebRTC-хелпер для лобби и ручного кода --- */
-  const P2P_ICE = { iceServers:[{ urls:'stun:stun.l.google.com:19302' }] }
+  /* TURN в РФ: адрес/логин/пароль взять из установленного coturn. null — релея нет. */
+  const TURN_CFG = null   /* { urls:'turn:1.2.3.4:3478', username:'shoot', credential:'пароль' } */
+  let P2P_PATH = ''
+  function p2pIceConfig(){
+    const el = document.getElementById('p2pRelay')
+    const relayOnly = !!(el && el.checked && TURN_CFG)
+    const iceServers = [{ urls:'stun:stun.l.google.com:19302' }]
+    if (TURN_CFG) iceServers.push({ urls: TURN_CFG.urls, username: TURN_CFG.username, credential: TURN_CFG.credential })
+    return relayOnly ? { iceServers, iceTransportPolicy: 'relay' } : { iceServers }
+  }
+  async function detectP2PPath(pc){
+    try {
+      const st = await pc.getStats()
+      let pair = null
+      st.forEach(r => { if (r.type === 'candidate-pair' && r.state === 'succeeded') pair = r })
+      if (!pair) return
+      const loc = st.get(pair.localCandidateId), rem = st.get(pair.remoteCandidateId)
+      P2P_PATH = (loc && loc.candidateType || '?') + '/' + (rem && rem.candidateType || '?')
+    } catch(e){}
+  }
   async function hostOffer(){
-    const pc = new RTCPeerConnection(P2P_ICE)
+    const pc = new RTCPeerConnection(p2pIceConfig())
     SIG.pc = pc
     const dc = pc.createDataChannel('game', { ordered:false, maxRetransmits:0 })
     SIG.dc = dc
-    dc.onopen = ()=>{ if (!SIG.started){ SIG.started = true; p2pLaunch('host') } }
+    dc.onopen = ()=>{ if (!SIG.started){ SIG.started = true; p2pLaunch('host') } detectP2PPath(pc); setTimeout(()=>detectP2PPath(pc), 4000) }
     dc.onclose = ()=>{ if (!SIG.started && SIG.role === 'host'){ p2pReset(); hostAnnounce() } }
     await pc.setLocalDescription(await pc.createOffer())
     await iceDone(pc)
     return pc.localDescription
   }
   async function guestAnswer(sdp){
-    const pc = new RTCPeerConnection(P2P_ICE)
+    const pc = new RTCPeerConnection(p2pIceConfig())
     SIG.pc = pc
     pc.ondatachannel = e => {
       SIG.dc = e.channel
-      SIG.dc.onopen = ()=>{ if (!SIG.started){ SIG.started = true; p2pLaunch('guest') } }
+      SIG.dc.onopen = ()=>{ if (!SIG.started){ SIG.started = true; p2pLaunch('guest') } detectP2PPath(pc); setTimeout(()=>detectP2PPath(pc), 4000) }
       SIG.dc.onclose = ()=>{ if (!SIG.started) p2pSay('Соединение не установилось.') }
     }
     await pc.setRemoteDescription(sdp)
