@@ -2349,6 +2349,10 @@ class GameScene extends Phaser.Scene {
     this.inputs[fromId] = data
   }
   onNetState(data){
+    if (this.p2pRole === 'guest' && !this.matchData.started){
+      this.matchData.started = true
+      this.hidePregame()
+    }
     this.applyState(data)
   }
   onNetBullet(data){
@@ -3232,6 +3236,23 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
       }
     }
 
+    /* Готовность теряется — повторяем её и показываем, кто готов */
+    if (this.p2pRole && !this.matchData.started){
+      if (this.myReady && time - (this._lastReadySend || 0) > 900){
+        this._lastReadySend = time
+        this.sendServer('ready', { color:this.myColor, team:this.myTeam, ready:true })
+      }
+      if (this.pregameEl && this.pregameEl.style.display !== 'none' &&
+          time - (this._lastReadyUi || 0) > 300){
+        this._lastReadyUi = time
+        const guestReady = this.p2pRole === 'host' && this.p2pGuest ? !!this.p2pReady[this.p2pGuest] : null
+        const txt = guestReady === null
+          ? (this.myReady ? 'Ты готов · ждём хоста' : 'Нажми «В БОЙ», когда готов')
+          : ('Готовы: ' + ((this.myReady ? 1 : 0) + (guestReady ? 1 : 0)) + ' / 2' + (this.p2pGuest ? '' : ' · ждём гостя'))
+        if (this.pregameStatusEl) this.pregameStatusEl.textContent = txt
+      }
+    }
+
     /* 🆕 f=1 только для ружья (гранаты — через tseq) */
     const firingFlag = (this.weapon === 'rifle' && this.firing) ? 1 : 0
 
@@ -3409,8 +3430,8 @@ this.cartSprite = this.add.text(CART_CX, CART_START.y, '🍲', {
 
   _p2pFromGuest(m){
     if (!this.p2pGuest){
-      if (m.type === 'join') this._p2pAcceptGuest()
-      return
+      if (m.type === 'join' || (!m.type && (m.a || (m.data && m.data.a)))) this._p2pAcceptGuest()
+      if (!this.p2pGuest) return
     }
     if (m.type) return
     const a = m.a || (m.data && m.data.a)
